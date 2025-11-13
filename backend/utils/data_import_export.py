@@ -6,12 +6,14 @@ Contains all CLI commands related to importing and exporting data (LAS files, TO
 import os
 import tempfile
 import shutil
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List, Tuple, Optional
 from datetime import datetime
 import pandas as pd
+import lasio
+import hashlib
 
 from utils.fe_data_objects import Well, Dataset, WellLog, Constant
-from utils.las_file_io import create_well_from_las
+from utils.las_file_io import get_well_name_from_las
 
 
 def generate_unique_name(existing_names: List[str], base_name: str) -> str:
@@ -33,6 +35,363 @@ def generate_unique_name(existing_names: List[str], base_name: str) -> str:
         counter += 1
     
     return f"{base_name}_{counter}"
+
+
+def create_well_from_las(
+    las_file_path: str,
+    project_path: str,
+    dataset_suffix: str = '',
+    copy_las_to_project: bool = True,
+    dataset_type: str = 'Cont',
+    enable_versioning: bool = True
+) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
+    """
+    Create or update a well from a LAS file. This is the shared logic used by both 
+    the API endpoint and CLI commands.
+    
+    Args:
+        las_file_path: Full path to the LAS file
+        project_path: Project directory path
+        dataset_suffix: Optional suffix to append to dataset names
+        copy_las_to_project: Whether to copy the LAS file to project's 02-INPUT_LAS_FOLDER
+        dataset_type: Type of dataset ('Cont' for continuous, 'Point' for variable interval)
+        enable_versioning: If True, auto-increment duplicate names (MAIN, MAIN_1, MAIN_2). If False, reject duplicates.
+        
+    Returns:
+        Tuple of (success, message, result_data)
+    """
+    try:
+        # Normalize and validate file path
+        las_file_path = os.path.normpath(las_file_path)
+        filename = os.path.basename(las_file_path)
+        
+        print(f"[LAS Import] Attempting to import file: {las_file_path}")
+        print(f"[LAS Import] File exists check: {os.path.exists(las_file_path)}")
+        
+        # Verify file exists with detailed error message
+        if not os.path.exists(las_file_path):
+            # Provide helpful debugging information
+            parent_dir = os.path.dirname(las_file_path)
+            if os.path.exists(parent_dir):
+                available_files = os.listdir(parent_dir) if os.path.isdir(parent_dir) else []
+                print(f"[LAS Import] Parent directory exists: {parent_dir}")
+                print(f"[LAS Import] Available files in directory: {available_files[:10]}")  # Show first 10 files
+                return False, f"❌ File not found: '{filename}' in directory '{parent_dir}'", None
+            else:
+                print(f"[LAS Import] Parent directory does not exist: {parent_dir}")
+                return False, f"❌ Directory not found: '{parent_dir}'. File path: '{las_file_path}'", None
+        
+        if not las_file_path.lower().endswith('.las'):
+            return False, f"❌ Invalid file type: '{filename}' is not a LAS file", None
+        
+        # Check file permissions - ensure we can read the file
+        if not os.access(las_file_path, os.R_OK):
+            print(f"[LAS Import] File exists but is not readable: {las_file_path}")
+            return False, f"❌ Permission denied: Cannot read file '{filename}'", None
+        
+        # Check file size (500 MB limit)
+        MAX_FILE_SIZE = 500 * 1024 * 1024  # 500 MB
+        RECOMMENDED_SIZE = 50 * 1024 * 1024  # 50 MB
+        
+        try:
+            file_size = os.path.getsize(las_file_path)
+        except OSError as e:
+            print(f"[LAS Import] Error getting file size: {e}")
+            return False, f"❌ Cannot access file '{filename}': {str(e)}", None
+        
+        file_size_mb = file_size / (1024 * 1024)
+        print(f"[LAS Import] File size: {file_size_mb:.2f} MB")
+        
+        if file_size == 0:
+            return False, f"❌ File is empty: '{filename}'", None
+        
+        if file_size > MAX_FILE_SIZE:
+            return False, f"❌ File too large: {file_size_mb:.2f} MB. Maximum allowed is 500 MB.", None
+        
+        # Warn if file is large but within limits
+        if file_size > RECOMMENDED_SIZE:
+            print(f"⚠️  Large file warning: {file_size_mb:.2f} MB. Processing may take longer. Recommended size is up to 50 MB for optimal performance.")
+        
+        # Parse LAS file with detailed error handling
+        print(f"[LAS Import] Parsing LAS file...")
+        try:
+            las = lasio.read(las_file_path)
+        except FileNotFoundError:
+            # This should not happen as we already checked, but just in case
+            print(f"[LAS Import] FileNotFoundError during LAS parsing: {las_file_path}")
+            return False, f"❌ File not found during parsing: '{filename}'", None
+        except PermissionError:
+            print(f"[LAS Import] PermissionError during LAS parsing: {las_file_path}")
+            return False, f"❌ Permission denied while reading file: '{filename}'", None
+        except Exception as las_error:
+            print(f"[LAS Import] Error parsing LAS file: {las_error}")
+            return False, f"❌ Invalid LAS file format in '{filename}': {str(las_error)}", None
+        
+        print(f"[LAS Import] LAS file parsed successfully")
+        
+        # Extract well name from parsed LAS object (WELL field in LAS metadata)
+        print(f"[LAS Import] Extracting well name from LAS file metadata...")
+        well_name = get_well_name_from_las(las_file_path, las_object=las)
+        if not well_name:
+            return False, f"❌ Cannot extract well name from LAS file '{filename}'", None
+        
+        print(f"[LAS Import] Well name extracted: '{well_name}'")
+        
+        # Get dataset name from LAS file or use default
+        # Priority: 1) dataset_suffix if provided, 2) LAS SET parameter, 3) default "MAIN"
+        dataset_name = 'MAIN'
+        if dataset_suffix and dataset_suffix.strip():
+            # If suffix is provided, use it as the dataset name
+            dataset_name = dataset_suffix.strip()
+            print(f"[LAS Import] Using provided dataset suffix as name: {dataset_name}")
+        else:
+            # Otherwise try to get from LAS SET parameter
+            try:
+                if hasattr(las.params, 'SET') and las.params.SET.value:
+                    dataset_name = str(las.params.SET.value).strip()
+                    if dataset_name:
+                        print(f"[LAS Import] Using SET parameter from LAS file: {dataset_name}")
+            except:
+                pass
+        
+        # Get depth range
+        top = 0
+        bottom = 0
+        try:
+            top = las.well.STRT.value if hasattr(las.well, 'STRT') else 0
+            bottom = las.well.STOP.value if hasattr(las.well, 'STOP') else 0
+        except:
+            pass
+        
+        # Create dataset from LAS file
+        dataset = Dataset.from_las(
+            filename=las_file_path,
+            dataset_name=dataset_name,
+            dataset_type=dataset_type,
+            well_name=well_name
+        )
+        
+        # Setup wells directory
+        wells_folder = os.path.join(project_path, '10-WELLS')
+        os.makedirs(wells_folder, exist_ok=True)
+        
+        well_file_path = os.path.join(wells_folder, f'{well_name}.ptrc')
+        
+        # Check if well already exists
+        well_created = False
+        dataset_merged = False
+        skipped_duplicate = False
+        new_curves_added = []
+        duplicate_curves = []
+        
+        if os.path.exists(well_file_path):
+            # Load existing well
+            well = Well.deserialize(filepath=well_file_path)
+            
+            # Get curve names from the new dataset
+            new_curve_names = set(log.name for log in dataset.well_logs)
+            print(f"[LAS Import] New dataset contains {len(new_curve_names)} curves: {list(new_curve_names)}")
+            
+            # Find the BEST matching dataset by checking curves (highest overlap ratio)
+            matching_dataset = None
+            best_overlap_ratio = 0
+            best_common_curves = []
+            best_unique_curves = []
+            
+            for existing_dataset in well.datasets:
+                # Skip system datasets (REFERENCE, WELL_HEADER)
+                if existing_dataset.type in ['REFERENCE', 'WELL_HEADER']:
+                    continue
+                
+                existing_curve_names = set(log.name for log in existing_dataset.well_logs)
+                
+                # Calculate curve overlap
+                common_curves = new_curve_names.intersection(existing_curve_names)
+                unique_new_curves = new_curve_names - existing_curve_names
+                
+                # Calculate overlap ratio (what percentage of new curves already exist in this dataset)
+                if len(new_curve_names) > 0:
+                    overlap_ratio = len(common_curves) / len(new_curve_names)
+                else:
+                    overlap_ratio = 0
+                
+                # If there's overlap and it's better than previous best, update best match
+                # Require at least 50% overlap to consider it a match
+                if overlap_ratio >= 0.5 and overlap_ratio > best_overlap_ratio:
+                    best_overlap_ratio = overlap_ratio
+                    matching_dataset = existing_dataset
+                    best_common_curves = list(common_curves)
+                    best_unique_curves = list(unique_new_curves)
+                    print(f"[LAS Import] Found better match: dataset '{existing_dataset.name}' with {len(common_curves)} common curves ({overlap_ratio*100:.1f}% overlap)")
+            
+            # Use the best match found
+            if matching_dataset:
+                duplicate_curves = best_common_curves
+                new_curves_added = best_unique_curves
+                print(f"[LAS Import] Best matching dataset: '{matching_dataset.name}' with {best_overlap_ratio*100:.1f}% overlap")
+            
+            if matching_dataset:
+                # Case 1: All curves already exist - complete duplicate
+                if len(new_curves_added) == 0:
+                    skipped_duplicate = True
+                    status_msg = f"ℹ️ Dataset already available: All {len(duplicate_curves)} curves from '{os.path.basename(las_file_path)}' already exist in dataset '{matching_dataset.name}' of well '{well_name}'"
+                    print(f"[LAS Import] Skipping duplicate - all curves already exist")
+                    print(f"[LAS Import] Duplicate curves: {duplicate_curves}")
+                    return True, status_msg, {
+                        'well_name': well_name,
+                        'dataset_name': matching_dataset.name,
+                        'well_file_path': well_file_path,
+                        'las_file_path': las_file_path,
+                        'las_destination': None,
+                        'well_created': False,
+                        'dataset_merged': False,
+                        'skipped_duplicate': True,
+                        'duplicate_curves': duplicate_curves,
+                        'new_curves_added': [],
+                        'curves_count': len(dataset.well_logs)
+                    }
+                
+                # Case 2: Some curves are new - merge them
+                else:
+                    dataset_merged = True
+                    print(f"[LAS Import] Merging {len(new_curves_added)} new curves into existing dataset '{matching_dataset.name}'")
+                    print(f"[LAS Import] New curves: {new_curves_added}")
+                    print(f"[LAS Import] Skipping duplicate curves: {duplicate_curves}")
+                    
+                    # Add only the new curves to the existing dataset
+                    for log in dataset.well_logs:
+                        if log.name in new_curves_added:
+                            matching_dataset.well_logs.append(log)
+                            print(f"[LAS Import] Added new curve '{log.name}' to dataset '{matching_dataset.name}'")
+                    
+                    # Update the dataset's metadata to track the merge
+                    if 'merge_history' not in matching_dataset.metadata:
+                        matching_dataset.metadata['merge_history'] = []
+                    matching_dataset.metadata['merge_history'].append({
+                        'date': datetime.now().isoformat(),
+                        'source_file': os.path.basename(las_file_path),
+                        'curves_added': new_curves_added,
+                        'curves_skipped': duplicate_curves
+                    })
+            else:
+                # Case 3: No matching dataset found - check for name collision and handle versioning
+                existing_dataset_names = [dtst.name for dtst in well.datasets]
+                original_dataset_name = dataset_name
+                if dataset_name in existing_dataset_names:
+                    if enable_versioning:
+                        # Auto-increment version: MAIN, MAIN_1, MAIN_2, etc.
+                        version = 1
+                        while f"{original_dataset_name}_{version}" in existing_dataset_names:
+                            version += 1
+                        dataset_name = f"{original_dataset_name}_{version}"
+                        dataset.name = dataset_name
+                        print(f"✓ Dataset versioned: {original_dataset_name} → {dataset_name}")
+                    else:
+                        return False, f"❌ Dataset '{dataset_name}' already exists in well '{well_name}'", None
+                
+                # Append new dataset
+                well.datasets.append(dataset)
+                print(f"[LAS Import] Added new dataset '{dataset_name}' to well '{well_name}'")
+        else:
+            # Create new well with REFERENCE and WELL_HEADER datasets
+            well = Well(
+                date_created=datetime.now(),
+                well_name=well_name,
+                well_type='Dev'
+            )
+            
+            # Create REFERENCE dataset
+            ref = Dataset.reference(
+                top=0,
+                bottom=bottom,
+                dataset_name='REFERENCE',
+                dataset_type='REFERENCE',
+                well_name=well_name
+            )
+            
+            # Create WELL_HEADER dataset with WELL_NAME constant
+            wh = Dataset.well_header(
+                dataset_name='WELL_HEADER',
+                dataset_type='WELL_HEADER',
+                well_name=well_name
+            )
+            const = Constant(name='WELL_NAME', value=well.well_name, tag=well.well_name)
+            wh.constants.append(const)
+            
+            well.datasets.append(ref)
+            well.datasets.append(wh)
+            well.datasets.append(dataset)
+            well_created = True
+        
+        # Save well to file
+        well.serialize(filename=well_file_path)
+        
+        # Copy LAS file to project folder if requested
+        las_destination = None
+        if copy_las_to_project:
+            las_folder = os.path.join(project_path, '02-INPUT_LAS_FOLDER')
+            os.makedirs(las_folder, exist_ok=True)
+            las_filename = os.path.basename(las_file_path)
+            las_destination = os.path.join(las_folder, las_filename)
+            
+            # Only copy if it's not already in the project folder
+            if os.path.abspath(las_file_path) != os.path.abspath(las_destination):
+                shutil.copy2(las_file_path, las_destination)
+        
+        # Build success message
+        if dataset_merged:
+            status_msg = f"✓ Merged {len(new_curves_added)} new curves from '{os.path.basename(las_file_path)}' into dataset '{dataset_name}' of well '{well_name}'"
+            status_msg += f" (skipped {len(duplicate_curves)} duplicate curves)"
+        else:
+            status_msg = f"✓ Imported dataset '{dataset_name}' from '{os.path.basename(las_file_path)}' into well '{well_name}'"
+            if well_created:
+                status_msg += " (new well created)"
+        
+        # Store well in storage session
+        try:
+            from utils.sqlite_storage import SQLiteStorageService
+            cache_service = SQLiteStorageService()
+            
+            normalized_path = os.path.normpath(project_path)
+            hash_object = hashlib.md5(normalized_path.encode())
+            session_id = f"project_{hash_object.hexdigest()}"
+            
+            existing_session = cache_service.load_session(session_id)
+            
+            if existing_session:
+                wells = existing_session.get("wells", {})
+                metadata = existing_session.get("metadata", {})
+            else:
+                wells = {}
+                metadata = {
+                    "project_path": project_path,
+                    "project_name": os.path.basename(project_path),
+                    "modified_wells": []
+                }
+            
+            wells[well_name] = well.to_dict()
+            cache_service.store_session(session_id, wells, metadata)
+        except Exception as storage_error:
+            print(f"[Warning] Failed to update JSON storage: {storage_error}")
+        
+        return True, status_msg, {
+            'well_name': well_name,
+            'dataset_name': dataset_name,
+            'well_file_path': well_file_path,
+            'las_file_path': las_file_path,
+            'las_destination': las_destination,
+            'well_created': well_created,
+            'dataset_merged': dataset_merged,
+            'skipped_duplicate': skipped_duplicate,
+            'new_curves_added': new_curves_added,
+            'duplicate_curves': duplicate_curves,
+            'curves_count': len(dataset.well_logs)
+        }
+        
+    except PermissionError:
+        return False, f"❌ Permission denied: Cannot write to project directory", None
+    except Exception as e:
+        return False, f"❌ Error creating well from LAS: {str(e)}", None
 
 
 class CLICommand:

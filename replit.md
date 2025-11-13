@@ -93,6 +93,55 @@ Production mode serves both static files and API from port 5000.
 
 ## Recent Changes
 
+### 2025-11-13: Smart Duplicate Detection & Code Reorganization
+
+#### Smart Duplicate Detection for LAS Imports
+Implemented intelligent duplicate detection when loading LAS files. The system now:
+
+**Features:**
+1. **Curve-Based Comparison**: Compares actual log curve names (not just dataset names)
+2. **Best-Match Selection**: Finds dataset with highest overlap ratio (≥50% required)
+3. **Intelligent Merging**: Three outcomes:
+   - **All curves exist** → Skip import, show "Dataset already available" message
+   - **Some curves new** → Merge only new curves, show count of added vs skipped
+   - **No match** → Create new dataset with versioning (MAIN, MAIN_1, MAIN_2, etc.)
+
+**Files Changed:**
+- `backend/utils/data_import_export.py`: Added smart duplicate detection logic (lines 43-393)
+- `frontend/src/components/dialogs/NewWellDialog.tsx`: Added UI messages for duplicate detection (lines 164-185)
+
+**How It Works:**
+```python
+# Backend detects duplicates by comparing curve names
+new_curve_names = set(log.name for log in dataset.well_logs)
+for existing_dataset in well.datasets:
+    existing_curve_names = set(log.name for log in existing_dataset.well_logs)
+    overlap_ratio = len(common_curves) / len(new_curve_names)
+    # Select dataset with highest overlap ratio (≥50%)
+```
+
+**User Messages:**
+- ℹ️ "Dataset Already Available" - all curves exist
+- ✓ "Curves Merged" - X new curves added, Y duplicates skipped
+- ✓ "Success" - new dataset created
+
+#### Code Reorganization
+Moved LAS import functions for better organization:
+
+**Changes:**
+1. Moved `create_well_from_las()` from `backend/utils/las_file_io.py` → `backend/utils/data_import_export.py`
+2. Updated imports in:
+   - `backend/utils/cli_service.py` - now imports from data_import_export.py
+   - `backend/utils/data_import_export.py` - imports helper functions from las_file_io.py
+3. Kept helper functions in `backend/utils/las_file_io.py`:
+   - `get_well_name_from_las()` - Extract well name from LAS metadata
+   - `read_las_file()` - Basic LAS file reading
+
+**Rationale:**
+- `data_import_export.py` is the natural home for import/export operations
+- Consolidates all LAS import logic in one place
+- Keeps low-level parsing helpers separate for reusability
+
 ### 2025-11-13: Storage Architecture Migration
 - **Migrated well data from SQLite to file-based storage**
   - Created `FileWellStorageService` with LRU cache (OrderedDict-based)
@@ -115,3 +164,90 @@ Production mode serves both static files and API from port 5000.
 - Configured deployment for autoscale
 - Added .gitignore for Python and Node.js
 - Workflow configured for port 5000 with webview output
+
+---
+
+## How to Verify System Features
+
+### 1. Verify File-Based Storage (.ptrc files)
+Check that well data is stored in `.ptrc` JSON files:
+```bash
+# List well files
+ls petrophysics-workplace/*/10-WELLS/*.ptrc
+
+# View file content
+cat "petrophysics-workplace/dfgdfgdf/10-WELLS/#13-31 Hoffman Et Al.ptrc" | head -n 20
+```
+
+**What to look for:**
+- Files have `.ptrc` extension (NOT `.db` or `.sql`)
+- Files are in `{project}/10-WELLS/` directory
+- Each file is valid JSON containing well data
+
+### 2. Verify Lazy Loading
+Watch the server logs when accessing wells:
+```bash
+# In server logs, look for:
+[FileWellStorage] Cache MISS for dfgdfgdf::#13-31 Hoffman Et Al, loading from disk...
+[FileWellStorage] Cached: dfgdfgdf::#13-31 Hoffman Et Al (cache size: 1/50)
+```
+
+**What to look for:**
+- First access shows "Cache MISS" → file loaded from disk
+- File is NOT loaded at server startup
+- Only loaded when requested (lazy loading)
+
+### 3. Verify LRU Caching
+Access the same well multiple times and watch logs:
+```bash
+# First access:
+[FileWellStorage] Cache MISS for dfgdfgdf::#13-31 Hoffman Et Al, loading from disk...
+
+# Subsequent accesses:
+[FileWellStorage] Cache HIT for dfgdfgdf::#13-31 Hoffman Et Al
+```
+
+**What to look for:**
+- First access = Cache MISS (loads from disk)
+- Next accesses = Cache HIT (loads from memory)
+- Cache size tracking: "(cache size: 5/50)"
+- Maximum 50 files cached in memory
+
+### 4. Verify Smart Duplicate Detection
+Try importing the same LAS file twice:
+
+**Step 1:** Import a LAS file
+- Result: "Success - Well created successfully"
+
+**Step 2:** Import the SAME LAS file again
+- Result: "Dataset Already Available - All X curves already exist"
+
+**Step 3:** Import LAS with some new curves + some duplicates
+- Result: "Curves Merged - Merged X new curves (skipped Y duplicate curves)"
+
+**What to look for in logs:**
+```bash
+[LAS Import] New dataset contains 12 curves: ['GR', 'RHOB', 'NPHI', ...]
+[LAS Import] Found better match: dataset 'MAIN' with 12 common curves (100.0% overlap)
+[LAS Import] Best matching dataset: 'MAIN' with 100.0% overlap
+[LAS Import] Skipping duplicate - all curves already exist
+```
+
+### 5. Verify Server Startup Indexing
+Restart the server and watch startup logs:
+```bash
+============================================================
+[STARTUP] Initializing File-Based Well Storage...
+============================================================
+[FileWellStorage] Indexing .ptrc files in /home/runner/workspace/petrophysics-workplace...
+[FileWellStorage] Indexed 21 well files.
+  - dfgdfgdf::#13-31 Hoffman Et Al -> /path/to/file.ptrc
+  - dfgdfgdf::#21D-14 Rozet -> /path/to/file.ptrc
+[STARTUP] Well file indexing complete. App is ready.
+```
+
+**What to look for:**
+- Server scans for all `.ptrc` files at startup
+- Creates index of file paths
+- Does NOT load file contents (only paths)
+- Shows count of indexed files

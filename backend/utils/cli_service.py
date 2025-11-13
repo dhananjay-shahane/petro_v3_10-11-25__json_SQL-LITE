@@ -12,8 +12,9 @@ from pathlib import Path
 import pandas as pd
 
 from utils.fe_data_objects import Well, Dataset, WellLog, Constant
-from utils.las_file_io import read_las_file, get_well_name_from_las, create_well_from_las
-from utils.data_import_export import (ImportLasFileCommand,
+from utils.las_file_io import read_las_file, get_well_name_from_las
+from utils.data_import_export import (create_well_from_las,
+                                      ImportLasFileCommand,
                                       ImportLasFilesFromFolderCommand,
                                       LoadTopsCommand, LoadTopsBulkCommand,
                                       ExportTopsCommand, ExportToLasCommand)

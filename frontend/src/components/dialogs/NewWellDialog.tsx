@@ -158,10 +158,28 @@ export default function NewWellDialog({
         throw new Error(result.error || "Failed to create well from LAS file");
       }
 
-      toast({
-        title: "Success",
-        description: `Well "${result.well.name}" created successfully from LAS file`,
-      });
+      // Show appropriate message based on duplicate detection result
+      if (result.skipped_duplicate) {
+        // All curves already exist
+        toast({
+          title: "Dataset Already Available",
+          description: `All ${result.duplicate_curves?.length || 0} curves from "${lasFile.name}" already exist in dataset "${result.dataset_name}" of well "${result.well_name}"`,
+        });
+      } else if (result.dataset_merged) {
+        // Some curves were new and merged
+        const newCount = result.new_curves_added?.length || 0;
+        const dupCount = result.duplicate_curves?.length || 0;
+        toast({
+          title: "Curves Merged",
+          description: `Merged ${newCount} new curve${newCount !== 1 ? 's' : ''} into dataset "${result.dataset_name}" of well "${result.well_name}" (skipped ${dupCount} duplicate curve${dupCount !== 1 ? 's' : ''})`,
+        });
+      } else {
+        // New dataset created
+        toast({
+          title: "Success",
+          description: `Well "${result.well.name}" created successfully from LAS file`,
+        });
+      }
 
       if (onWellCreated) {
         onWellCreated();
