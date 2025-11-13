@@ -222,13 +222,7 @@ async def load_all_wells(request: LoadAllWellsRequest):
                     wells_dict[well_name] = well_data
                     loaded_count += 1
                     print(f"[LoadAllWells] Loaded well '{well_name}' from {filename}")
-                    
-                    # Save to permanent SQLite storage
-                    try:
-                        cache_service.save_well(well_data, project_path)
-                        print(f"[LoadAllWells] Saved well '{well_name}' to SQLite")
-                    except Exception as e:
-                        print(f"[LoadAllWells] Warning: Failed to save well '{well_name}' to SQLite: {e}")
+                    # Note: Well data is stored in .ptrc files, not SQLite
                 except Exception as e:
                     failed_wells.append({"well": well_name, "error": str(e)})
                     print(f"[LoadAllWells] Failed to load well '{well_name}': {e}")
@@ -299,8 +293,8 @@ async def set_current_project(request: SetCurrentProjectRequest):
 @router.post("/migrate-wells", response_model=MigrateWellsResponse)
 async def migrate_wells_to_sqlite(request: MigrateWellsRequest = Body(...)):
     """
-    Migrate all .ptrc wells from a project to SQLite database.
-    This is idempotent and safe to run multiple times.
+    DEPRECATED: Wells are now stored in .ptrc files only, not SQLite.
+    This endpoint is kept for backwards compatibility but does nothing.
     """
     try:
         project_path = os.path.abspath(request.projectPath)
@@ -316,61 +310,27 @@ async def migrate_wells_to_sqlite(request: MigrateWellsRequest = Body(...)):
         
         wells_folder = os.path.join(project_path, "10-WELLS")
         
-        if not os.path.exists(wells_folder):
-            return {
-                "success": True,
-                "message": "No wells folder found in project",
-                "totalWells": 0,
-                "migratedWells": 0,
-                "failedWells": []
-            }
-        
         total_count = 0
-        migrated_count = 0
-        failed_wells = []
+        if os.path.exists(wells_folder):
+            for filename in os.listdir(wells_folder):
+                if filename.endswith('.ptrc'):
+                    total_count += 1
         
-        print(f"[MigrateWells] Starting migration for project: {project_path}")
-        
-        for filename in os.listdir(wells_folder):
-            if filename.endswith('.ptrc'):
-                total_count += 1
-                file_path = os.path.join(wells_folder, filename)
-                well_name = filename.replace('.ptrc', '')
-                
-                try:
-                    well = Well.deserialize(filepath=file_path)
-                    well_data = well.to_dict()
-                    
-                    if not well_data.get('well_name') or not well_data.get('datasets'):
-                        raise ValueError("Invalid well data: missing well_name or datasets")
-                    
-                    cache_service.save_well(well_data, project_path)
-                    migrated_count += 1
-                    print(f"[MigrateWells] Migrated well '{well_name}' to SQLite")
-                    
-                except Exception as e:
-                    failed_wells.append({"well": well_name, "error": str(e)})
-                    print(f"[MigrateWells] Failed to migrate well '{well_name}': {e}")
-        
-        success_msg = f"Successfully migrated {migrated_count} of {total_count} wells to SQLite"
-        if failed_wells:
-            success_msg += f" ({len(failed_wells)} failed)"
-        
-        print(f"[MigrateWells] {success_msg}")
+        print(f"[MigrateWells] DEPRECATED: Wells are stored in .ptrc files, no migration needed")
         
         return {
             "success": True,
-            "message": success_msg,
+            "message": f"Wells are stored in .ptrc files ({total_count} found). No migration needed.",
             "totalWells": total_count,
-            "migratedWells": migrated_count,
-            "failedWells": failed_wells
+            "migratedWells": total_count,  # Report all as "migrated" (already in files)
+            "failedWells": []
         }
         
     except HTTPException:
         raise
     except Exception as e:
         print(f"[MigrateWells] Error: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to migrate wells: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to check wells: {str(e)}")
 
 
 @router.delete("/delete", response_model=DeleteProjectResponse)
