@@ -1,0 +1,587 @@
+{
+  "appInfo": {
+    "version": "2.0.0",
+    "name": "Petrophysics Workspace",
+    "lastUpdated": "2025-11-10T05:59:35.499693+00:00"
+  },
+  "workspace": {
+    "root": "/home/runner/workspace/petrophysics-workplace",
+    "currentProject": {
+      "sessionId": "project_647d247799a48cb4f2a110cbba9cde8f",
+      "path": "/home/runner/workspace/petrophysics-workplace/fgfddfghfd",
+      "name": "fgfddfghfd",
+      "openedAt": "2025-11-10T05:59:35.262202+00:00"
+    }
+  },
+  "projects": {
+    "project_35ee3aa3642caf820d4b5e547fa68438": {
+      "projectPath": "/home/runner/workspace/petrophysics-workplace/project",
+      "activeWell": "KJ#14",
+      "selectedWells": [],
+      "cliHistory": "g",
+      "savedLayouts": {
+        "default": {
+          "rcDockLayout": {
+            "dockbox": {
+              "id": "+1",
+              "size": 200,
+              "mode": "horizontal",
+              "children": [
+                {
+                  "id": "+2",
+                  "size": 220,
+                  "mode": "vertical",
+                  "children": [
+                    {
+                      "id": "+3",
+                      "size": 200,
+                      "tabs": [
+                        {
+                          "id": "wells"
+                        }
+                      ],
+                      "group": "default",
+                      "activeId": "wells"
+                    },
+                    {
+                      "id": "+4",
+                      "size": 200,
+                      "tabs": [
+                        {
+                          "id": "zonation"
+                        }
+                      ],
+                      "group": "default",
+                      "activeId": "zonation"
+                    }
+                  ]
+                },
+                {
+                  "id": "+5",
+                  "size": 700,
+                  "mode": "vertical",
+                  "children": [
+                    {
+                      "id": "+6",
+                      "size": 200,
+                      "tabs": [
+                        {
+                          "id": "emptyDock"
+                        }
+                      ],
+                      "group": "emptyDock",
+                      "activeId": "emptyDock"
+                    },
+                    {
+                      "id": "+7",
+                      "size": 200,
+                      "tabs": [
+                        {
+                          "id": "feedback"
+                        }
+                      ],
+                      "group": "default",
+                      "activeId": "feedback"
+                    }
+                  ]
+                },
+                {
+                  "id": "+8",
+                  "size": 300,
+                  "mode": "vertical",
+                  "children": [
+                    {
+                      "id": "+9",
+                      "size": 200,
+                      "tabs": [
+                        {
+                          "id": "dataBrowser"
+                        }
+                      ],
+                      "group": "default",
+                      "activeId": "dataBrowser"
+                    },
+                    {
+                      "id": "+10",
+                      "size": 200,
+                      "tabs": [
+                        {
+                          "id": "cli"
+                        }
+                      ],
+                      "group": "default",
+                      "activeId": "cli"
+                    }
+                  ]
+                }
+              ]
+            },
+            "floatbox": {
+              "id": "+90",
+              "size": 0,
+              "mode": "float",
+              "children": []
+            },
+            "windowbox": {
+              "id": "+91",
+              "size": 0,
+              "mode": "window",
+              "children": []
+            },
+            "maxbox": {
+              "id": "+92",
+              "size": 1,
+              "mode": "maximize",
+              "children": []
+            }
+          },
+          "visiblePanels": [
+            "wells",
+            "zonation",
+            "dataBrowser",
+            "feedback",
+            "cli"
+          ],
+          "windowLinks": {},
+          "savedAt": "2025-11-07T16:33:51.645532+00:00"
+        }
+      }
+    },
+    "project_647d247799a48cb4f2a110cbba9cde8f": {
+      "projectPath": "/home/runner/workspace/petrophysics-workplace/fgfddfghfd",
+      "activeWell": "",
+      "layout": {
+        "windows": [
+          {
+            "id": "wellsWindow",
+            "type": "wells"
+          },
+          {
+            "id": "zonationWindow",
+            "type": "zonation"
+          },
+          {
+            "id": "dataBrowserWindow",
+            "type": "dataBrowser"
+          },
+          {
+            "id": "feedbackWindow",
+            "type": "feedback"
+          },
+          {
+            "id": "cliWindow",
+            "type": "cli"
+          }
+        ],
+        "activeWindowId": "wellsWindow",
+        "links": [
+          "wellsWindow",
+          "zonationWindow",
+          "dataBrowserWindow",
+          "feedbackWindow",
+          "cliWindow"
+        ],
+        "unlinks": [],
+        "_rcDockLayout": {
+          "dockbox": {
+            "id": "+1",
+            "size": 200,
+            "mode": "horizontal",
+            "children": [
+              {
+                "id": "+2",
+                "size": 394,
+                "mode": "vertical",
+                "children": [
+                  {
+                    "id": "+3",
+                    "size": 200,
+                    "tabs": [
+                      {
+                        "id": "wells"
+                      }
+                    ],
+                    "group": "default",
+                    "activeId": "wells"
+                  },
+                  {
+                    "id": "+4",
+                    "size": 200,
+                    "tabs": [
+                      {
+                        "id": "zonation"
+                      }
+                    ],
+                    "group": "default",
+                    "activeId": "zonation"
+                  }
+                ]
+              },
+              {
+                "id": "+5",
+                "size": 707,
+                "mode": "vertical",
+                "children": [
+                  {
+                    "id": "+6",
+                    "size": 300,
+                    "tabs": [
+                      {
+                        "id": "dataBrowser"
+                      }
+                    ],
+                    "group": "default",
+                    "activeId": "dataBrowser"
+                  },
+                  {
+                    "id": "+7",
+                    "size": 200,
+                    "mode": "horizontal",
+                    "children": [
+                      {
+                        "id": "+8",
+                        "size": 200,
+                        "tabs": [
+                          {
+                            "id": "feedback"
+                          }
+                        ],
+                        "group": "default",
+                        "activeId": "feedback"
+                      },
+                      {
+                        "id": "+9",
+                        "size": 200,
+                        "tabs": [
+                          {
+                            "id": "cli"
+                          }
+                        ],
+                        "group": "default",
+                        "activeId": "cli"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          "floatbox": {
+            "id": "+10",
+            "size": 1,
+            "mode": "float",
+            "children": []
+          },
+          "windowbox": {
+            "id": "+11",
+            "size": 1,
+            "mode": "window",
+            "children": []
+          },
+          "maxbox": {
+            "id": "+12",
+            "size": 1,
+            "mode": "maximize",
+            "children": []
+          }
+        }
+      },
+      "visiblePanels": [
+        "wells",
+        "zonation",
+        "dataBrowser",
+        "feedback",
+        "cli"
+      ],
+      "layoutSavedAt": "2025-11-06T05:06:00.223780+00:00",
+      "selectedWells": [],
+      "cliHistory": ""
+    },
+    "project_47dafb4b3254672b1a11c649cad81522": {
+      "projectPath": "/home/runner/workspace/petrophysics-workplace/Downloads",
+      "activeWell": "",
+      "selectedWells": [],
+      "cliHistory": "",
+      "layout": {
+        "windows": [
+          {
+            "id": "wellsWindow",
+            "type": "wells"
+          },
+          {
+            "id": "zonationWindow",
+            "type": "zonation"
+          },
+          {
+            "id": "dataBrowserWindow",
+            "type": "dataBrowser"
+          },
+          {
+            "id": "feedbackWindow",
+            "type": "feedback"
+          },
+          {
+            "id": "cliWindow",
+            "type": "cli"
+          }
+        ],
+        "activeWindowId": "wellsWindow",
+        "links": [
+          "wellsWindow",
+          "zonationWindow",
+          "dataBrowserWindow",
+          "feedbackWindow",
+          "cliWindow"
+        ],
+        "unlinks": []
+      },
+      "visiblePanels": [
+        "wells",
+        "zonation",
+        "dataBrowser",
+        "feedback",
+        "cli"
+      ],
+      "layoutSavedAt": "2025-11-06T05:19:57.074619+00:00"
+    }
+  },
+  "wells": {
+    "project_35ee3aa3642caf820d4b5e547fa68438": {
+      "projectPath": null,
+      "projectName": null,
+      "wells": {
+        "KJ#14": {
+          "datasets": [
+            {
+              "selectedLogs": []
+            },
+            {
+              "selectedLogs": []
+            },
+            {
+              "selectedLogs": []
+            }
+          ],
+          "totalLogs": 0,
+          "lastAccessed": "2025-11-10T05:37:34.606064+00:00"
+        },
+        "KJ-05": {
+          "datasets": [
+            {
+              "selectedLogs": [
+                "DEPTH"
+              ]
+            },
+            {
+              "selectedLogs": []
+            },
+            {
+              "selectedLogs": [
+                "DEPTH",
+                "CALI",
+                "DTC",
+                "GR",
+                "LLD",
+                "NPHI",
+                "PE",
+                "RHOB"
+              ]
+            }
+          ],
+          "totalLogs": 8,
+          "lastAccessed": "2025-11-10T05:37:34.606064+00:00"
+        },
+        "KJ-08": {
+          "datasets": [
+            {
+              "selectedLogs": []
+            },
+            {
+              "selectedLogs": []
+            },
+            {
+              "selectedLogs": []
+            }
+          ],
+          "totalLogs": 0,
+          "lastAccessed": "2025-11-10T05:37:34.606064+00:00"
+        },
+        "SELAN-251001_KJ#14_COMP MAIN LAS": {
+          "datasets": [
+            {
+              "selectedLogs": []
+            },
+            {
+              "selectedLogs": []
+            },
+            {
+              "selectedLogs": []
+            }
+          ],
+          "totalLogs": 0,
+          "lastAccessed": "2025-11-10T05:37:34.606064+00:00"
+        },
+        "kj-04_splice": {
+          "datasets": [
+            {
+              "selectedLogs": []
+            },
+            {
+              "selectedLogs": []
+            },
+            {
+              "selectedLogs": []
+            }
+          ],
+          "totalLogs": 0,
+          "lastAccessed": "2025-11-10T05:37:34.606064+00:00"
+        },
+        "kj-05_splice": {
+          "datasets": [
+            {
+              "selectedLogs": []
+            },
+            {
+              "selectedLogs": []
+            },
+            {
+              "selectedLogs": []
+            }
+          ],
+          "totalLogs": 0,
+          "lastAccessed": "2025-11-10T05:37:34.606064+00:00"
+        }
+      },
+      "updatedAt": "2025-11-10T05:37:34.606064+00:00",
+      "expiresAt": "2025-11-10T09:37:34.606102+00:00"
+    },
+    "project_647d247799a48cb4f2a110cbba9cde8f": {
+      "projectPath": "/home/runner/workspace/petrophysics-workplace/fgfddfghfd",
+      "projectName": "fgfddfghfd",
+      "wells": {
+        "#36-16 State": {
+          "datasets": [
+            {
+              "selectedLogs": [
+                "DEPTH"
+              ]
+            },
+            {
+              "selectedLogs": []
+            },
+            {
+              "selectedLogs": [
+                "DEPT",
+                "DT",
+                "RESD",
+                "SP",
+                "GR"
+              ]
+            }
+          ],
+          "totalLogs": 6,
+          "lastAccessed": "2025-11-10T05:59:35.499693+00:00"
+        },
+        "KJ#14": {
+          "datasets": [
+            {
+              "selectedLogs": [
+                "DEPTH"
+              ]
+            },
+            {
+              "selectedLogs": []
+            },
+            {
+              "selectedLogs": [
+                "DEPT",
+                "TENS",
+                "BHVT",
+                "AHVT",
+                "BITSIZE",
+                "GR",
+                "MMK",
+                "CALI",
+                "SP",
+                "RHOB",
+                "NPHI",
+                "PE",
+                "DRHO",
+                "LLS",
+                "LLD"
+              ]
+            }
+          ],
+          "totalLogs": 16,
+          "lastAccessed": "2025-11-10T05:59:35.499693+00:00"
+        },
+        "kj-04_splice": {
+          "datasets": [
+            {
+              "selectedLogs": [
+                "DEPTH"
+              ]
+            },
+            {
+              "selectedLogs": []
+            },
+            {
+              "selectedLogs": [
+                "DEPTH",
+                "DTC",
+                "GR",
+                "NPHI",
+                "PEFZ",
+                "RHOZ",
+                "RLA1",
+                "RLA2",
+                "RLA3",
+                "RLA4",
+                "RLA5"
+              ]
+            }
+          ],
+          "totalLogs": 11,
+          "lastAccessed": "2025-11-10T05:59:35.499693+00:00"
+        },
+        "kj-05_splice": {
+          "datasets": [
+            {
+              "selectedLogs": [
+                "DEPTH"
+              ]
+            },
+            {
+              "selectedLogs": []
+            },
+            {
+              "selectedLogs": [
+                "DEPTH",
+                "CALI",
+                "DTC",
+                "GR",
+                "LLD",
+                "NPHI",
+                "PE",
+                "RHOB"
+              ]
+            }
+          ],
+          "totalLogs": 8,
+          "lastAccessed": "2025-11-10T05:59:35.499693+00:00"
+        }
+      },
+      "updatedAt": "2025-11-10T05:59:35.499693+00:00",
+      "expiresAt": "2025-11-10T09:59:35.499746+00:00"
+    }
+  },
+  "layout": {
+    "fontSizes": {
+      "dataBrowser": 14,
+      "wellList": 14,
+      "feedbackLog": 13,
+      "zonationList": 14,
+      "cliTerminal": 16
+    }
+  }
+}

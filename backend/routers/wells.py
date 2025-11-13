@@ -1,0 +1,1114 @@
+import os
+import tempfile
+import traceback
+import shutil
+import lasio
+import hashlib
+import sqlite3
+from pathlib import Path
+from datetime import datetime
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from werkzeug.utils import secure_filename
+
+from models import (
+    LASPreviewRequest, LASPreviewResponse, WellCreateResponse,
+    WellLoadResponse, WellDataResponse, DatasetDetailsResponse,
+    WellListResponse, WellDatasetsResponse, LogPlotRequest,
+    LogPlotResponse, CrossPlotRequest, CrossPlotResponse, LogMessage
+)
+from dependencies import (
+    WORKSPACE_ROOT, validate_path, allowed_file, sanitize_list
+)
+from utils.fe_data_objects import Well, Dataset, Constant
+from utils.LogPlot import LogPlotManager
+from utils.CPI import CrossPlotManager
+from utils.cpi_plotly import CPIPlotlyManager
+from utils.matplotlib_cpi_plot import MatplotlibCPIPlotter
+from utils.sqlite_storage import SQLiteStorageService
+
+cache_service = SQLiteStorageService()
+
+
+router = APIRouter(prefix="/wells", tags=["wells"])
+
+
+def get_project_session_id(project_path: str) -> str:
+    """Generate a consistent session ID for a project path"""
+    normalized_path = os.path.normpath(project_path)
+    hash_object = hashlib.md5(normalized_path.encode())
+    return f"project_{hash_object.hexdigest()}"
+
+
+def store_well_in_session(well_path: str, well_data: dict):
+    """Store well data in JSON storage session automatically"""
+    try:
+        project_path = os.path.dirname(os.path.dirname(well_path))
+        session_id = get_project_session_id(project_path)
+        well_name = os.path.basename(well_path).replace('.ptrc', '')
+        
+        existing_session = cache_service.load_session(session_id)
+        
+        if existing_session:
+            wells = existing_session.get("wells", {})
+            metadata = existing_session.get("metadata", {})
+        else:
+            wells = {}
+            metadata = {
+                "project_path": project_path,
+                "project_name": os.path.basename(project_path),
+                "modified_wells": []
+            }
+        
+        wells[well_name] = well_data
+        
+        cache_service.store_session(session_id, wells, metadata)
+        print(f"[Storage] Stored well '{well_name}' in session {session_id}")
+        
+        return session_id
+    except Exception as e:
+        print(f"[Storage] Error storing well in session: {e}")
+        return None
+
+
+def fetch_well_data(project_path: str, well_id: str):
+    """
+    Fetch well data from SQLite first, falling back to disk if not cached.
+    Returns tuple of (Well object, well_data dict)
+    
+    This helper ensures all endpoints use consistent data retrieval logic.
+    """
+    # Try to load from SQLite first
+    well_data_from_sqlite = None
+    try:
+        well_data_from_sqlite = cache_service.get_well(project_path, well_id)
+        if well_data_from_sqlite:
+            print(f"[WellFetch] Loaded well '{well_id}' from SQLite database")
+            # Reconstruct Well object from cached data
+            well = Well.from_dict(well_data_from_sqlite)
+            return well, well_data_from_sqlite
+    except Exception as e:
+        print(f"[WellFetch] Failed to load from SQLite: {e}")
+    
+    # Fallback to disk
+    wells_folder = os.path.join(project_path, "10-WELLS")
+    well_file = os.path.join(wells_folder, f"{well_id}.ptrc")
+    
+    if not os.path.exists(well_file):
+        raise HTTPException(status_code=404, detail=f"Well {well_id} not found")
+    
+    print(f"[WellFetch] Loading well '{well_id}' from disk: {well_file}")
+    well = Well.deserialize(filepath=well_file)
+    well_data = well.to_dict()
+    
+    # Save to SQLite for future use
+    try:
+        cache_service.save_well(well_data, project_path)
+        print(f"[WellFetch] Saved well '{well_id}' to SQLite for future use")
+    except Exception as e:
+        print(f"[WellFetch] Warning: Failed to save to SQLite: {e}")
+    
+    # Also store in session
+    store_well_in_session(well_file, well_data)
+    
+    return well, well_data
+
+
+@router.post("/preview-las", response_model=LASPreviewResponse)
+async def preview_las(data: LASPreviewRequest):
+    """Preview LAS file content without saving"""
+    try:
+        las_content = data.lasContent
+        filename = data.filename
+        
+        if not las_content:
+            raise HTTPException(status_code=400, detail="LAS content is required")
+        
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.las', delete=False) as tmp_file:
+            tmp_file.write(las_content)
+            tmp_path = tmp_file.name
+        
+        try:
+            las = lasio.read(tmp_path)
+            
+            well_name = None
+            
+            try:
+                if hasattr(las.well, 'WELL'):
+                    well_obj = las.well.WELL
+                    if well_obj and well_obj.value:
+                        well_name = str(well_obj.value).strip()
+            except:
+                pass
+            
+            if not well_name:
+                for item in las.well:
+                    if item.mnemonic.upper() == 'WELL' and item.value:
+                        well_name = str(item.value).strip()
+                        break
+            
+            if not well_name:
+                well_name = Path(filename).stem if filename != 'UNKNOWN' else 'UNKNOWN'
+            
+            uwi = ""
+            try:
+                if hasattr(las.well, 'UWI'):
+                    uwi_obj = las.well.UWI
+                    if uwi_obj and uwi_obj.value:
+                        uwi = str(uwi_obj.value).strip()
+            except:
+                pass
+            
+            preview_info = {
+                "wellName": well_name,
+                "uwi": uwi,
+                "company": str(las.well.COMP.value).strip() if hasattr(las.well, 'COMP') and las.well.COMP and las.well.COMP.value else "",
+                "field": str(las.well.FLD.value).strip() if hasattr(las.well, 'FLD') and las.well.FLD and las.well.FLD.value else "",
+                "location": str(las.well.LOC.value).strip() if hasattr(las.well, 'LOC') and las.well.LOC and las.well.LOC.value else "",
+                "startDepth": float(las.well.STRT.value) if hasattr(las.well, 'STRT') and las.well.STRT and las.well.STRT.value is not None else None,
+                "stopDepth": float(las.well.STOP.value) if hasattr(las.well, 'STOP') and las.well.STOP and las.well.STOP.value is not None else None,
+                "step": float(las.well.STEP.value) if hasattr(las.well, 'STEP') and las.well.STEP and las.well.STEP.value is not None else None,
+                "curveNames": [curve.mnemonic for curve in las.curves],
+                "dataPoints": len(las.data) if las.data is not None else 0
+            }
+            
+            return preview_info
+        finally:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/create-from-las", response_model=WellCreateResponse, status_code=201)
+async def create_from_las(
+    lasFile: UploadFile = File(...),
+    projectPath: str = Form(...),
+    setName: str = Form(None),
+    datasetType: str = Form("CONTINUOUS")
+):
+    """Upload LAS file and create well in project"""
+    logs = []
+    try:
+        logs.append({"message": "Starting LAS file upload...", "type": "info"})
+        
+        if not projectPath:
+            raise HTTPException(status_code=400, detail="Project path is required")
+        
+        if not lasFile.filename:
+            raise HTTPException(status_code=400, detail="No file selected")
+        
+        logs.append({"message": f"File selected: {lasFile.filename}", "type": "info"})
+        
+        if not allowed_file(lasFile.filename):
+            logs.append({"message": "ERROR: Invalid file type. Only .las files are allowed", "type": "error"})
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid file type. Only .las files are allowed"
+            )
+        
+        resolved_project_path = os.path.abspath(projectPath)
+        if not validate_path(resolved_project_path):
+            logs.append({"message": "ERROR: Access denied - path outside workspace", "type": "error"})
+            raise HTTPException(
+                status_code=403,
+                detail="Access denied: path outside petrophysics-workplace"
+            )
+        
+        if not os.path.exists(resolved_project_path):
+            logs.append({"message": "ERROR: Project path does not exist", "type": "error"})
+            raise HTTPException(status_code=404, detail="Project path does not exist")
+        
+        filename = secure_filename(lasFile.filename)
+        logs.append({"message": f"Saving file as: {filename}", "type": "info"})
+        
+        # Validate file size while reading (500 MB limit)
+        MAX_FILE_SIZE = 500 * 1024 * 1024
+        total_size = 0
+        tmp_las_path = None
+        
+        with tempfile.NamedTemporaryFile(mode='wb', suffix='.las', delete=False) as tmp_file:
+            tmp_las_path = tmp_file.name
+            # Read file in chunks to validate size without loading all into memory
+            chunk_size = 1024 * 1024  # 1 MB chunks
+            while True:
+                chunk = await lasFile.read(chunk_size)
+                if not chunk:
+                    break
+                total_size += len(chunk)
+                if total_size > MAX_FILE_SIZE:
+                    logs.append({"message": f"ERROR: File too large. Maximum size is {MAX_FILE_SIZE // (1024 * 1024)} MB", "type": "error"})
+                    # Clean up partial file immediately before raising
+                    tmp_file.close()
+                    if tmp_las_path and os.path.exists(tmp_las_path):
+                        os.unlink(tmp_las_path)
+                        tmp_las_path = None  # Prevent double cleanup in finally block
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"File too large. Maximum upload size is {MAX_FILE_SIZE // (1024 * 1024)} MB"
+                    )
+                tmp_file.write(chunk)
+        
+        try:
+            logs.append({"message": "Parsing LAS file...", "type": "info"})
+            
+            las = lasio.read(tmp_las_path)
+            
+            well_name = None
+            
+            try:
+                if hasattr(las.well, 'WELL'):
+                    well_obj = las.well.WELL
+                    if well_obj and well_obj.value:
+                        well_name = str(well_obj.value).strip()
+            except:
+                pass
+            
+            if not well_name:
+                for item in las.well:
+                    if item.mnemonic.upper() == 'WELL' and item.value:
+                        well_name = str(item.value).strip()
+                        break
+            
+            if not well_name:
+                well_name = Path(filename).stem
+            
+            logs.append({"message": f"Extracted well name: {well_name}", "type": "info"})
+            
+            # Determine dataset name: custom setName > LAS SET parameter > default "MAIN"
+            dataset_name = 'MAIN'
+            if setName and setName.strip():
+                dataset_name = setName.strip()
+                logs.append({"message": f"Using custom dataset name: {dataset_name}", "type": "info"})
+            else:
+                try:
+                    if hasattr(las.params, 'SET') and las.params.SET.value:
+                        dataset_name = str(las.params.SET.value).strip()
+                        logs.append({"message": f"Using SET parameter from LAS file: {dataset_name}", "type": "info"})
+                except:
+                    pass
+            
+            logs.append({"message": f"Dataset name: {dataset_name}", "type": "info"})
+            
+            # Normalize dataset type
+            dataset_type_normalized = 'Cont' if datasetType.upper() == 'CONTINUOUS' else 'Point'
+            logs.append({"message": f"Dataset type: {datasetType} (normalized to {dataset_type_normalized})", "type": "info"})
+            
+            top = las.well.STRT.value
+            bottom = las.well.STOP.value
+            
+            dataset = Dataset.from_las(
+                filename=tmp_las_path,
+                dataset_name=dataset_name,
+                dataset_type=dataset_type_normalized,
+                well_name=well_name
+            )
+            
+            logs.append({"message": "LAS file parsed successfully", "type": "success"})
+            logs.append({"message": f"Found {len(dataset.well_logs)} log curves", "type": "info"})
+            
+            wells_folder = os.path.join(resolved_project_path, '10-WELLS')
+            os.makedirs(wells_folder, exist_ok=True)
+            
+            well_file_path = os.path.join(wells_folder, f'{well_name}.ptrc')
+            
+            if os.path.exists(well_file_path):
+                logs.append({"message": f"Well \"{well_name}\" already exists, checking for duplicates...", "type": "info"})
+                well = Well.deserialize(filepath=well_file_path)
+                
+                # Implement versioning: if dataset name exists, auto-increment (MAIN, MAIN_1, MAIN_2, etc.)
+                existing_dataset_names = [dtst.name for dtst in well.datasets]
+                original_dataset_name = dataset_name
+                if dataset_name in existing_dataset_names:
+                    logs.append({"message": f"Dataset \"{dataset_name}\" already exists, applying versioning...", "type": "info"})
+                    version = 1
+                    while f"{original_dataset_name}_{version}" in existing_dataset_names:
+                        version += 1
+                    dataset_name = f"{original_dataset_name}_{version}"
+                    dataset.name = dataset_name
+                    logs.append({"message": f"Versioned dataset name: {dataset_name}", "type": "info"})
+                
+                well.datasets.append(dataset)
+                logs.append({"message": f"Dataset \"{dataset_name}\" appended to existing well", "type": "success"})
+            else:
+                logs.append({"message": f"Creating new well \"{well_name}\"...", "type": "info"})
+                well = Well(
+                    date_created=datetime.now(),
+                    well_name=well_name,
+                    well_type='Dev'
+                )
+                
+                ref = Dataset.reference(
+                    top=0,
+                    bottom=bottom,
+                    dataset_name='REFERENCE',
+                    dataset_type='REFERENCE',
+                    well_name=well_name
+                )
+                
+                wh = Dataset.well_header(
+                    dataset_name='WELL_HEADER',
+                    dataset_type='WELL_HEADER',
+                    well_name=well_name
+                )
+                const = Constant(name='WELL_NAME', value=well.well_name, tag=well.well_name)
+                wh.constants.append(const)
+                
+                well.datasets.append(ref)
+                well.datasets.append(wh)
+                well.datasets.append(dataset)
+                
+                logs.append({"message": "New well created with REFERENCE and WELL_HEADER datasets", "type": "success"})
+            
+            logs.append({"message": "Saving well to project...", "type": "info"})
+            
+            well.serialize(filename=well_file_path)
+            
+            well_data = well.to_dict()
+            store_well_in_session(well_file_path, well_data)
+            
+            # Save to permanent SQLite storage
+            try:
+                cache_service.save_well(well_data, resolved_project_path)
+                logs.append({"message": "Well saved to SQLite database", "type": "success"})
+                
+                # Update project timestamp to mark project as modified when LAS is uploaded
+                try:
+                    db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'petrophysics.db')
+                    conn = sqlite3.connect(db_path)
+                    cursor = conn.cursor()
+                    session_id = get_project_session_id(resolved_project_path)
+                    now = datetime.utcnow().isoformat()
+                    cursor.execute("""
+                        INSERT OR IGNORE INTO projects (session_id, project_path, updated_at)
+                        VALUES (?, ?, ?)
+                    """, (session_id, resolved_project_path, now))
+                    cursor.execute("""
+                        UPDATE projects SET updated_at = ? WHERE session_id = ?
+                    """, (now, session_id))
+                    conn.commit()
+                    conn.close()
+                    logs.append({"message": "Project marked as modified", "type": "success"})
+                except Exception as timestamp_error:
+                    logs.append({"message": f"Warning: Failed to update project timestamp: {str(timestamp_error)}", "type": "warning"})
+            except Exception as e:
+                logs.append({"message": f"Warning: Failed to save to SQLite: {str(e)}", "type": "warning"})
+            
+            logs.append({"message": f"SUCCESS: Well saved to: {well_file_path}", "type": "success"})
+            
+            las_folder = os.path.join(resolved_project_path, '02-INPUT_LAS_FOLDER')
+            os.makedirs(las_folder, exist_ok=True)
+            las_destination = os.path.join(las_folder, filename)
+            shutil.copy2(tmp_las_path, las_destination)
+            
+            logs.append({"message": f"SUCCESS: LAS file copied to: {las_destination}", "type": "success"})
+            logs.append({"message": f"Well \"{well_name}\" created successfully!", "type": "success"})
+            
+            return {
+                "success": True,
+                "message": f"Well \"{well_name}\" created successfully",
+                "well": {
+                    "id": well_name,
+                    "name": well_name,
+                    "type": well.well_type
+                },
+                "filePath": well_file_path,
+                "lasFilePath": las_destination,
+                "logs": logs
+            }
+            
+        finally:
+            if tmp_las_path and os.path.exists(tmp_las_path):
+                os.unlink(tmp_las_path)
+                
+    except HTTPException:
+        raise
+    except Exception as e:
+        traceback.print_exc()
+        logs.append({"message": f"ERROR: {str(e)}", "type": "error"})
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/load", response_model=WellLoadResponse)
+async def load_well(filePath: str):
+    """Load well data from .ptrc file"""
+    try:
+        if not filePath:
+            raise HTTPException(status_code=400, detail="File path is required")
+        
+        resolved_path = os.path.abspath(filePath)
+        if not validate_path(resolved_path):
+            raise HTTPException(
+                status_code=403,
+                detail="Access denied: path outside petrophysics-workplace"
+            )
+        
+        if not os.path.exists(resolved_path):
+            raise HTTPException(status_code=404, detail="Well file not found")
+        
+        if not resolved_path.endswith('.ptrc'):
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid file type. Only .ptrc files are supported"
+            )
+        
+        well = Well.deserialize(filepath=resolved_path)
+        
+        well_data = well.to_dict()
+        store_well_in_session(resolved_path, well_data)
+        
+        datasets = []
+        for dataset in well.datasets:
+            logs = []
+            for log in dataset.well_logs:
+                preview_values = log.log[:100] if hasattr(log, 'log') else []
+                logs.append({
+                    "name": log.name,
+                    "date": str(log.date) if hasattr(log, 'date') else '',
+                    "description": log.description if hasattr(log, 'description') else '',
+                    "dataset": log.dtst if hasattr(log, 'dtst') else dataset.name,
+                    "interpolation": log.interpolation if hasattr(log, 'interpolation') else '',
+                    "logType": log.log_type if hasattr(log, 'log_type') else '',
+                    "values": sanitize_list(preview_values)
+                })
+            
+            constants = []
+            if hasattr(dataset, 'constants') and dataset.constants:
+                for const in dataset.constants:
+                    constants.append({
+                        "name": const.name if hasattr(const, 'name') else '',
+                        "value": str(const.value) if hasattr(const, 'value') else '',
+                        "tag": const.tag if hasattr(const, 'tag') else ''
+                    })
+            
+            datasets.append({
+                "name": dataset.name,
+                "type": dataset.type,
+                "wellname": dataset.wellname,
+                "indexName": dataset.index_name if hasattr(dataset, 'index_name') else 'DEPTH',
+                "logs": logs,
+                "constants": constants
+            })
+        
+        return {
+            "success": True,
+            "well": {
+                "name": well.well_name,
+                "type": well.well_type,
+                "dateCreated": str(well.date_created) if hasattr(well, 'date_created') else '',
+                "datasets": datasets
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/data", response_model=WellDataResponse)
+async def get_well_data(wellPath: str):
+    """Get complete well dataset data for data browser - prefers SQLite, falls back to disk"""
+    try:
+        if not wellPath:
+            raise HTTPException(status_code=400, detail="Well path is required")
+        
+        resolved_path = os.path.abspath(wellPath)
+        if not validate_path(resolved_path):
+            raise HTTPException(
+                status_code=403,
+                detail="Access denied: path outside petrophysics-workplace"
+            )
+        
+        well_name = os.path.basename(resolved_path).replace('.ptrc', '')
+        project_path = os.path.dirname(os.path.dirname(resolved_path))
+        
+        # Try to load from SQLite first
+        well_data_from_sqlite = None
+        try:
+            well_data_from_sqlite = cache_service.get_well(project_path, well_name)
+            if well_data_from_sqlite:
+                print(f"[DataAPI] Loaded well '{well_name}' from SQLite database")
+        except Exception as e:
+            print(f"[DataAPI] Failed to load from SQLite, will try disk: {e}")
+        
+        # Fallback to disk if SQLite doesn't have it
+        if not well_data_from_sqlite:
+            if not os.path.exists(resolved_path):
+                raise HTTPException(status_code=404, detail="Well file not found")
+            
+            print(f"[DataAPI] Loading complete well data for '{well_name}' from disk")
+            well = Well.deserialize(filepath=resolved_path)
+            well_data = well.to_dict()
+            
+            # Save to SQLite for future use
+            try:
+                cache_service.save_well(well_data, project_path)
+                print(f"[DataAPI] Saved well '{well_name}' to SQLite for future use")
+            except Exception as e:
+                print(f"[DataAPI] Warning: Failed to save to SQLite: {e}")
+        else:
+            # Reconstruct Well object from SQLite data
+            well = Well.from_dict(well_data_from_sqlite)
+            well_data = well_data_from_sqlite
+        
+        store_well_in_session(resolved_path, well_data)
+        
+        datasets = []
+        for dataset in well.datasets:
+            logs = []
+            for log in dataset.well_logs:
+                logs.append({
+                    "name": log.name,
+                    "date": str(log.date) if hasattr(log, 'date') else '',
+                    "description": log.description if hasattr(log, 'description') else '',
+                    "dtst": log.dtst if hasattr(log, 'dtst') else dataset.name,
+                    "interpolation": log.interpolation if hasattr(log, 'interpolation') else '',
+                    "log_type": log.log_type if hasattr(log, 'log_type') else '',
+                    "log": sanitize_list(log.log) if hasattr(log, 'log') else []
+                })
+            
+            constants = []
+            if hasattr(dataset, 'constants') and dataset.constants:
+                for const in dataset.constants:
+                    constants.append({
+                        "name": const.name if hasattr(const, 'name') else '',
+                        "value": const.value if hasattr(const, 'value') else '',
+                        "tag": const.tag if hasattr(const, 'tag') else ''
+                    })
+            
+            datasets.append({
+                "name": dataset.name,
+                "type": dataset.type,
+                "wellname": dataset.wellname,
+                "index_name": dataset.index_name if hasattr(dataset, 'index_name') else 'DEPTH',
+                "index_log": sanitize_list(dataset.index_log) if hasattr(dataset, 'index_log') else [],
+                "well_logs": logs,
+                "constants": constants
+            })
+        
+        return {
+            "success": True,
+            "wellName": well.well_name if hasattr(well, 'well_name') else os.path.basename(resolved_path).replace('.ptrc', ''),
+            "datasets": datasets
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/dataset-details", response_model=DatasetDetailsResponse)
+async def get_dataset_details(wellPath: str, datasetName: str):
+    """Get specific dataset details for data browser"""
+    try:
+        if not wellPath:
+            raise HTTPException(status_code=400, detail="Well path is required")
+        
+        if not datasetName:
+            raise HTTPException(status_code=400, detail="Dataset name is required")
+        
+        resolved_path = os.path.abspath(wellPath)
+        if not validate_path(resolved_path):
+            raise HTTPException(
+                status_code=403,
+                detail="Access denied: path outside petrophysics-workplace"
+            )
+        
+        if not os.path.exists(resolved_path):
+            raise HTTPException(status_code=404, detail="Well file not found")
+        
+        well = Well.deserialize(filepath=resolved_path)
+        
+        target_dataset = None
+        for dataset in well.datasets:
+            if dataset.name == datasetName:
+                target_dataset = dataset
+                break
+        
+        if not target_dataset:
+            raise HTTPException(status_code=404, detail=f"Dataset \"{datasetName}\" not found")
+        
+        logs = []
+        for log in target_dataset.well_logs:
+            logs.append({
+                "name": log.name,
+                "date": str(log.date) if hasattr(log, 'date') else '',
+                "description": log.description if hasattr(log, 'description') else '',
+                "dtst": log.dtst if hasattr(log, 'dtst') else target_dataset.name,
+                "interpolation": log.interpolation if hasattr(log, 'interpolation') else '',
+                "log_type": log.log_type if hasattr(log, 'log_type') else '',
+                "log": sanitize_list(log.log) if hasattr(log, 'log') else []
+            })
+        
+        constants = []
+        if hasattr(target_dataset, 'constants') and target_dataset.constants:
+            for const in target_dataset.constants:
+                constants.append({
+                    "name": const.name if hasattr(const, 'name') else '',
+                    "value": const.value if hasattr(const, 'value') else '',
+                    "tag": const.tag if hasattr(const, 'tag') else ''
+                })
+        
+        dataset_details = {
+            "name": target_dataset.name,
+            "type": target_dataset.type,
+            "wellname": target_dataset.wellname,
+            "index_name": target_dataset.index_name if hasattr(target_dataset, 'index_name') else 'DEPTH',
+            "index_log": sanitize_list(target_dataset.index_log) if hasattr(target_dataset, 'index_log') else [],
+            "well_logs": logs,
+            "constants": constants
+        }
+        
+        return {
+            "success": True,
+            "dataset": dataset_details
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/list", response_model=WellListResponse)
+async def list_wells(projectPath: str):
+    """List all wells in a project (reads from SQLite first, falls back to .ptrc files)"""
+    try:
+        if not projectPath:
+            raise HTTPException(status_code=400, detail="Project path is required")
+        
+        resolved_path = os.path.abspath(projectPath)
+        if not validate_path(resolved_path):
+            raise HTTPException(
+                status_code=403,
+                detail="Access denied: path outside petrophysics-workplace"
+            )
+        
+        # If project doesn't exist, return empty list with helpful message
+        if not os.path.exists(resolved_path):
+            print(f"[Wells API] Project path does not exist: {resolved_path}")
+            return {"wells": []}
+        
+        # Try to get wells from SQLite first
+        try:
+            sqlite_wells = cache_service.get_project_wells(resolved_path)
+            if sqlite_wells:
+                print(f"[Wells API] Found {len(sqlite_wells)} wells in SQLite database")
+                wells = []
+                for well_summary in sqlite_wells:
+                    wells.append({
+                        "id": well_summary['well_name'],
+                        "name": well_summary['well_name'],
+                        "type": well_summary.get('well_type', 'Dev'),
+                        "path": os.path.join(resolved_path, "10-WELLS", f"{well_summary['well_name']}.ptrc"),
+                        "created_at": well_summary.get('date_created'),
+                        "datasets": well_summary.get('total_datasets', 0)
+                    })
+                wells.sort(key=lambda x: x['name'])
+                return {"wells": wells}
+        except Exception as e:
+            print(f"[Wells API] Error reading from SQLite, falling back to .ptrc files: {e}")
+        
+        # Fallback: read from .ptrc files
+        wells_folder = os.path.join(resolved_path, "10-WELLS")
+        
+        # If wells folder doesn't exist, return empty list (not an error)
+        if not os.path.exists(wells_folder):
+            print(f"[Wells API] Wells folder does not exist: {wells_folder}")
+            return {"wells": []}
+        
+        wells = []
+        for filename in os.listdir(wells_folder):
+            if filename.endswith('.ptrc'):
+                file_path = os.path.join(wells_folder, filename)
+                try:
+                    well = Well.deserialize(filepath=file_path)
+                    wells.append({
+                        "id": well.well_name,
+                        "name": well.well_name,
+                        "type": well.well_type,
+                        "path": file_path,
+                        "created_at": well.date_created.isoformat() if well.date_created else None,
+                        "datasets": len(well.datasets)
+                    })
+                except Exception as e:
+                    print(f"Error loading well {filename}: {e}")
+                    continue
+        
+        wells.sort(key=lambda x: x['name'])
+        return {"wells": wells}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/datasets", response_model=WellDatasetsResponse)
+async def get_well_datasets(projectPath: str, wellName: str):
+    """Get all datasets for a well"""
+    try:
+        if not projectPath or not wellName:
+            raise HTTPException(
+                status_code=400,
+                detail="Project path and well name are required"
+            )
+        
+        resolved_path = os.path.abspath(projectPath)
+        if not validate_path(resolved_path):
+            raise HTTPException(
+                status_code=403,
+                detail="Access denied: path outside petrophysics-workplace"
+            )
+        
+        wells_folder = os.path.join(resolved_path, "10-WELLS")
+        well_file = os.path.join(wells_folder, f"{wellName}.ptrc")
+        
+        if not os.path.exists(well_file):
+            raise HTTPException(status_code=404, detail=f"Well {wellName} not found")
+        
+        well = Well.deserialize(filepath=well_file)
+        
+        well_data = well.to_dict()
+        store_well_in_session(well_file, well_data)
+        
+        datasets = []
+        seen_logs = set()
+        
+        for dataset in well.datasets:
+            logs = []
+            for well_log in dataset.well_logs:
+                logs.append({
+                    "name": well_log.name,
+                    "date": str(well_log.date) if hasattr(well_log, 'date') else '',
+                    "description": well_log.description if hasattr(well_log, 'description') else '',
+                    "dtst": well_log.dtst if hasattr(well_log, 'dtst') else dataset.name,
+                    "interpolation": well_log.interpolation if hasattr(well_log, 'interpolation') else '',
+                    "log_type": well_log.log_type if hasattr(well_log, 'log_type') else '',
+                })
+            
+            datasets.append({
+                "name": dataset.name,
+                "type": dataset.type,
+                "wellname": dataset.wellname,
+                "indexName": dataset.index_name if hasattr(dataset, 'index_name') else 'DEPTH',
+                "index_name": dataset.index_name if hasattr(dataset, 'index_name') else 'DEPTH',
+                "index_log": [],
+                "logs": logs,
+                "well_logs": logs,
+                "constants": [],
+                "date_created": dataset.date_created.isoformat() if dataset.date_created else None,
+                "description": None
+            })
+            
+            for well_log in dataset.well_logs:
+                if well_log.name not in seen_logs:
+                    seen_logs.add(well_log.name)
+                    datasets.append({
+                        "name": well_log.name,
+                        "type": 'Cont' if well_log.log_type == 'float' else dataset.type,
+                        "wellname": None,
+                        "indexName": "DEPTH",
+                        "index_name": "DEPTH",
+                        "index_log": [],
+                        "logs": [],
+                        "well_logs": [],
+                        "constants": [],
+                        "date_created": None,
+                        "description": well_log.description if hasattr(well_log, 'description') else ''
+                    })
+        
+        return {
+            "success": True,
+            "wellName": well.well_name,
+            "datasets": datasets
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{well_id}/log-plot", response_model=LogPlotResponse)
+async def generate_log_plot(well_id: str, data: LogPlotRequest):
+    """Generate a well log plot for specified logs"""
+    try:
+        print(f"[LOG PLOT] Starting log plot generation for well: {well_id}")
+        project_path = data.projectPath
+        log_names = data.logNames
+        
+        if not project_path:
+            print("[LOG PLOT] Error: Project path is required")
+            raise HTTPException(status_code=400, detail="Project path is required")
+        
+        if not log_names or len(log_names) == 0:
+            print("[LOG PLOT] Error: No log names provided")
+            raise HTTPException(status_code=400, detail="At least one log name is required")
+        
+        print(f"[LOG PLOT] Plotting logs: {', '.join(log_names)}")
+        
+        resolved_path = os.path.abspath(project_path)
+        if not validate_path(resolved_path):
+            print("[LOG PLOT] Error: Path validation failed")
+            raise HTTPException(
+                status_code=403,
+                detail="Access denied: path outside petrophysics-workplace"
+            )
+        
+        # Use helper to fetch from SQLite first, fallback to disk
+        well, well_data = fetch_well_data(resolved_path, well_id)
+        print(f"[LOG PLOT] Well loaded successfully: {well.well_name}")
+        print(f"[LOG PLOT] Number of datasets: {len(well.datasets)}")
+        
+        print("[LOG PLOT] Initializing LogPlotManager...")
+        plot_manager = LogPlotManager()
+        
+        # Check if XML layout is requested
+        xml_layout_path = None
+        if data.layoutName:
+            layout_file = os.path.join(os.path.dirname(__file__), '..', 'layouts', f'{data.layoutName}.xml')
+            if os.path.exists(layout_file):
+                xml_layout_path = layout_file
+                print(f"[LOG PLOT] Using XML layout: {layout_file}")
+            else:
+                print(f"[LOG PLOT] Warning: XML layout '{data.layoutName}' not found, using default plotting")
+        
+        print("[LOG PLOT] Creating log plot with Plotly...")
+        plotly_json = plot_manager.create_log_plot(well, log_names, xml_layout_path=xml_layout_path)
+        
+        if not plotly_json:
+            print("[LOG PLOT] Error: Plot generation failed")
+            raise HTTPException(status_code=500, detail="Failed to generate plot")
+        
+        print("[LOG PLOT] Plot generated successfully!")
+        print(f"[LOG PLOT] Plotly JSON size: {len(plotly_json)} characters")
+        
+        return {
+            "success": True,
+            "plotly_json": plotly_json,
+            "format": "plotly",
+            "logs": [
+                f"Starting log plot generation for well: {well_id}",
+                f"Plotting logs: {', '.join(log_names)}",
+                f"Well loaded: {well.well_name}",
+                f"Number of datasets: {len(well.datasets)}",
+                "Plot generated successfully with Plotly!"
+            ]
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[LOG PLOT] Error: {str(e)}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{well_id}/cross-plot", response_model=CrossPlotResponse)
+async def generate_cross_plot(well_id: str, data: CrossPlotRequest):
+    """Generate a cross plot of two logs"""
+    try:
+        print(f"[CROSS PLOT] Starting cross plot generation for well: {well_id}")
+        project_path = data.projectPath
+        x_log_name = data.xLog
+        y_log_name = data.yLog
+        
+        if not project_path or not x_log_name or not y_log_name:
+            print("[CROSS PLOT] Error: Missing required parameters")
+            raise HTTPException(
+                status_code=400,
+                detail="Project path, x log, and y log are required"
+            )
+        
+        print(f"[CROSS PLOT] X-axis log: {x_log_name}")
+        print(f"[CROSS PLOT] Y-axis log: {y_log_name}")
+        
+        resolved_path = os.path.abspath(project_path)
+        if not validate_path(resolved_path):
+            print("[CROSS PLOT] Error: Path validation failed")
+            raise HTTPException(
+                status_code=403,
+                detail="Access denied: path outside petrophysics-workplace"
+            )
+        
+        wells_folder = os.path.join(resolved_path, "10-WELLS")
+        well_file = os.path.join(wells_folder, f"{well_id}.ptrc")
+        
+        print(f"[CROSS PLOT] Loading well from: {well_file}")
+        if not os.path.exists(well_file):
+            print("[CROSS PLOT] Error: Well file not found")
+            raise HTTPException(status_code=404, detail=f"Well {well_id} not found")
+        
+        well = Well.deserialize(filepath=well_file)
+        print(f"[CROSS PLOT] Well loaded successfully: {well.well_name}")
+        print(f"[CROSS PLOT] Number of datasets: {len(well.datasets)}")
+        
+        print("[CROSS PLOT] Initializing CrossPlotManager...")
+        manager = CrossPlotManager()
+        
+        print("[CROSS PLOT] Creating cross plot with matplotlib...")
+        plot_image = manager.create_cross_plot(well, x_log_name, y_log_name)
+        
+        if plot_image is None:
+            print("[CROSS PLOT] Error: Failed to generate plot")
+            raise HTTPException(
+                status_code=404,
+                detail="Failed to generate cross plot - logs not found or no valid data"
+            )
+        
+        print("[CROSS PLOT] Cross plot generated successfully!")
+        print(f"[CROSS PLOT] Image size: {len(plot_image)} characters (base64)")
+        
+        return {
+            "success": True,
+            "image": plot_image,
+            "format": "png",
+            "encoding": "base64",
+            "logs": [
+                f"Starting cross plot generation for well: {well_id}",
+                f"X-axis log: {x_log_name}",
+                f"Y-axis log: {y_log_name}",
+                f"Well loaded: {well.well_name}",
+                f"Number of datasets: {len(well.datasets)}",
+                "Cross plot generated successfully!"
+            ]
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{well_id}/cpi-plot", response_model=LogPlotResponse)
+async def generate_cpi_plot(well_id: str, data: LogPlotRequest):
+    """Generate a CPI layout well log plot using Plotly (interactive)"""
+    try:
+        print(f"[CPI PLOT] Starting CPI plot generation for well: {well_id}")
+        project_path = data.projectPath
+        layout_name = data.layoutName
+        
+        if not project_path:
+            raise HTTPException(status_code=400, detail="Project path is required")
+        
+        if not layout_name:
+            raise HTTPException(status_code=400, detail="Layout name is required for CPI plots")
+        
+        print(f"[CPI PLOT] Using layout: {layout_name}")
+        
+        resolved_path = os.path.abspath(project_path)
+        if not validate_path(resolved_path):
+            raise HTTPException(
+                status_code=403,
+                detail="Access denied: path outside petrophysics-workplace"
+            )
+        
+        # Load well
+        wells_folder = os.path.join(resolved_path, "10-WELLS")
+        well_file = os.path.join(wells_folder, f"{well_id}.ptrc")
+        
+        print(f"[CPI PLOT] Loading well from: {well_file}")
+        if not os.path.exists(well_file):
+            raise HTTPException(status_code=404, detail=f"Well {well_id} not found")
+        
+        well = Well.deserialize(filepath=well_file)
+        print(f"[CPI PLOT] Well loaded: {well.well_name}")
+        
+        # Find XML layout file
+        layouts_folder = os.path.join(Path(__file__).parent.parent, "layouts")
+        xml_path = os.path.join(layouts_folder, f"{layout_name}.xml")
+        
+        if not os.path.exists(xml_path):
+            raise HTTPException(status_code=404, detail=f"Layout {layout_name} not found")
+        
+        print(f"[CPI PLOT] Using layout file: {xml_path}")
+        
+        # Convert well data to DataFrame
+        import pandas as pd
+        
+        # Collect all logs into a DataFrame
+        all_logs = {}
+        depth_log = None
+        
+        for dataset in well.datasets:
+            # Get depth/index log
+            if hasattr(dataset, 'index_log') and dataset.index_log:
+                if depth_log is None:
+                    depth_log = dataset.index_log
+                    all_logs['DEPTH'] = dataset.index_log
+            
+            # Get well logs
+            for wlog in dataset.well_logs:
+                all_logs[wlog.name] = wlog.log
+        
+        if not all_logs or 'DEPTH' not in all_logs:
+            raise HTTPException(status_code=400, detail="Well data must contain DEPTH log")
+        
+        df_logs = pd.DataFrame(all_logs)
+        print(f"[CPI PLOT] DataFrame created with {len(df_logs)} rows and {len(df_logs.columns)} columns")
+        
+        # Load TOPS if available
+        df_tops = None
+        tops_found = False
+        for dataset in well.datasets:
+            if dataset.type.upper() == 'TOPS' or dataset.name.upper() == 'TOPS':
+                tops_data = {}
+                for wlog in dataset.well_logs:
+                    if wlog.name.upper() == 'TOP':
+                        tops_data['top_name'] = wlog.log
+                        tops_found = True
+                    elif 'DEPTH' in wlog.name.upper():
+                        tops_data['depth'] = wlog.log
+                
+                if tops_found and 'depth' in tops_data:
+                    df_tops = pd.DataFrame(tops_data)
+                    print(f"[CPI PLOT] TOPS data found: {len(df_tops)} tops")
+                break
+        
+        # Initialize CPI Plotly Manager
+        print("[CPI PLOT] Initializing CPIPlotlyManager...")
+        manager = CPIPlotlyManager()
+        
+        # Create the plot
+        print("[CPI PLOT] Generating interactive CPI plot with Plotly...")
+        plot_json = manager.create_cpi_plot(
+            df_logs=df_logs,
+            xml_layout_path=xml_path,
+            well_name=well.well_name,
+            df_tops=df_tops,
+            df_perfs=None,  # TODO: Load perforation data if available
+            spec_folder=None  # TODO: Add spec folder path if needed
+        )
+        
+        print("[CPI PLOT] CPI plot generated successfully!")
+        
+        return {
+            "success": True,
+            "plotly_json": plot_json,
+            "format": "plotly",
+            "encoding": "json",
+            "logs": [
+                f"Starting CPI plot generation for well: {well_id}",
+                f"Using layout: {layout_name}",
+                f"Well loaded: {well.well_name}",
+                f"DataFrame: {len(df_logs)} rows, {len(df_logs.columns)} columns",
+                f"TOPS: {'Found' if df_tops is not None else 'Not found'}",
+                "CPI plot generated successfully!"
+            ]
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))

@@ -1,0 +1,49 @@
+<WellLogLayout depth_scale="640" major_y_tick = "25" minor_y_tick = "5" grid_color="lightgray" wh_font_size="11" 
+    wh_color="black" th_font_size="6" base_hspace="0.01" 
+    th_header_height = "0.3" log_header_vertical_spacing = "0.6"
+    lr_limits_font_size= "5" curve_names_font_size= "5"
+    fluid_color_file_name="fluid_colors_standard" >
+<!-- 
+track_header_font_size = th_font_size
+
+ -->
+    <Track name="TVDSS" type="scale" width="0.5" controls="False">
+        <Curve name="TVDSS" major_grid="50" minor_grid="5" linestyle="solid"/>
+    </Track>
+    <Track name="TOPS" type='TOPS' width="0.5">
+        <Curve name="ZONES" color="green" linestyle="solid" zone_label_spacing="15"/>
+    </Track>
+    <Track name="DEPTH" type="scale" width="0.5" controls="True">
+        <Curve name="DEPTH" major_grid="50" minor_grid="5" linestyle="solid"/>
+    </Track>
+    <Track name="GR" type="wireline" width="0.5">
+        <Curve name="GR" color="green" linestyle="solid" line_thickness="1" min="0" max="200" baseline="60" right_fill_color="green" left_fill_color="yellow"/>
+    </Track>
+    <Track name="RES" width='0.5'>
+        <Curve name="RESD" color="red" linestyle="solid" />
+        <Curve name="RESS" color="blue" linestyle="dashed" />
+    </Track>
+    <Track name="POR" type="wireline" width="0.5" color="blue">
+        <Curve name="NPHI" color="blue" linestyle="dashed" />
+        <Curve name="RHOB" color="red" linestyle="solid" line_thickness="0.4" shading_left="previous" />
+    </Track>
+    <Track name="VSH" width="0.5" ygrid="True" xgrid="False">
+        <Curve name="VSH" color="black" linestyle="solid" shading_right="right_limit" shading_left = "left_limit" left_fill_color="green" right_fill_color="yellow" />
+    </Track>
+    <Track name="CPI" width="0.5">
+        <Curve name="SWE" color="blue" linestyle="solid"/>
+    </Track>
+    <Track name="FLD" width='0.3' type="FLUID">
+        <Curve name="FLUID" color="red" linestyle="solid" />
+    </Track>
+    <Track name="CPI-VOL" width="0.6">
+        <Curve name="PHIE" color="black" plot="line" linestyle="solid" line_thickness="0.1" />
+        <Curve name="VOL_UWAT" color="black" plot="line" linestyle="solid" line_thickness="0.1" shading_right="right_limit" shading_left = "previous" right_fill_color="blue" left_fill_color="red"/>
+    </Track>
+    <Track name="PERF" width="0.3" type="PERF">
+        <Curve name="PERFS" color="black" linestyle="dashed" line_thickness="1" min="0" max="1.01" />
+    </Track>
+    <Track name="PROD" type='TEXT' width="1.5">
+        <Curve name="PERFS_PROD" color="black" linestyle="solid" adjust_depth="yes" adjust_diff="10" decimals="1"/>
+    </Track>
+</WellLogLayout>

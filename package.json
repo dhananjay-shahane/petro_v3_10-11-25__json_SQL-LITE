@@ -1,0 +1,21 @@
+{
+  "name": "petrophysics-workspace",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "bash dev.sh",
+    "build": "cd frontend && npm run build",
+    "start": "bash production.sh"
+  },
+  "workspaces": [
+    "frontend"
+  ],
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  },
+  "dependencies": {
+    "@babel/traverse": "^7.28.5",
+    "@babel/types": "^7.28.5"
+  }
+}

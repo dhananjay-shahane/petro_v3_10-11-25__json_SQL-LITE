@@ -1,0 +1,984 @@
+@import 'rc-dock/dist/rc-dock.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer utilities {
+  @keyframes spin-scale {
+    0% {
+      transform: rotate(0deg) scale(1);
+    }
+    50% {
+      transform: rotate(180deg) scale(1.2);
+    }
+    100% {
+      transform: rotate(360deg) scale(1);
+    }
+  }
+}
+
+/* 1. Ensure the core HTML elements span the full viewport height */
+html,
+body,
+#root { /* Replace #root with the ID of your main React mount point */
+  height: 100%;
+  margin: 0;      /* Remove default browser margin */
+  padding: 0;     /* Remove default browser padding */
+}
+
+/* --- Splitter Base Styles --- */
+.container {
+  /* max-width: 800px;
+  margin: 20px auto;
+  border: 1px solid #ccc;
+  padding: 10px;
+  border-radius: 4px; */
+  height: 100%; 
+  max-width: none; /* If you want it full width */
+  margin: 0;
+  padding: 0;
+  border: none; /* Optional: remove the border to clean up the edge */
+}
+
+.split-flex.vertical-split {
+  /* Set a defined height for the entire split area */
+   height: 100%; 
+}
+
+/* --- Gutter (Divider) Styles --- */
+.gutter {
+  background-color: #eee;
+  background-repeat: no-repeat;
+  background-position: 50%;
+  transition: background-color 0.1s;
+}
+
+.gutter.gutter-vertical {
+  cursor: row-resize; /* Shows the vertical resizing cursor */
+}
+
+.gutter:hover {
+  background-color: #ddd;
+}
+
+/* --- Pane Styles --- */
+.pane-top, 
+.pane-bottom {
+  padding: 10px;
+  /* overflow: auto; Allows content to scroll if it exceeds the pane size */
+}
+
+/* --- Auto-Resize Text Area Fix (THE KEY PART) --- */
+
+/* 1. Make the top pane a flex container with a column direction */
+.pane-top {
+  display: flex;
+  flex-direction: column;
+  height: 100%; /* Must fill the vertical space given by the splitter */
+}
+
+/* 2. Style the textarea to consume all available vertical space */
+.pane-top textarea {
+  flex-grow: 1; /* <-- This is the core solution to fill height */
+  width: 100%;
+  min-height: 0; /* Ensures flex-grow works correctly, overriding browser defaults */
+  resize: none; /* Recommended: Disable browser-native resizing handle */
+  border: 1px solid #4a90e2;
+  font-family: monospace;
+  font-size: 14px;
+  padding: 8px;
+  box-sizing: border-box;
+}
+
+
+.pane-bottom textarea {
+    /* white-space: pre-wrap;
+    font-family: monospace;
+    font-size: 14px;
+    background-color: #f7f7f7;
+    padding: 10px;
+    border: 1px solid #ddd;
+    height: 100%;
+    overflow: auto; */
+
+    flex-grow: 1; /* <-- This is the core solution to fill height */
+    width: 100%;
+    min-height: 0; /* Ensures flex-grow works correctly, overriding browser defaults */
+    resize: none; /* Recommended: Disable browser-native resizing handle */
+    border: 1px solid #4a90e2;
+    font-family: monospace;
+    font-size: 14px;
+    padding: 8px;
+    box-sizing: border-box;
+    overflow: auto;
+
+}
+
+
+
+/* LIGHT MODE */
+:root {
+  --button-outline: rgba(0, 0, 0, .10);
+  --badge-outline: rgba(0, 0, 0, .05);
+
+  /* Automatic computation of border around primary / danger buttons */
+  --opaque-button-border-intensity: -8;
+  /* In terms of percentages */
+
+  /* Backgrounds applied on top of other backgrounds when hovered/active */
+  --elevate-1: rgba(0, 0, 0, .03);
+  --elevate-2: rgba(0, 0, 0, .08);
+
+  --background: 0 0% 98%;
+
+  --foreground: 180 50% 15%;
+
+  --border: 180 20% 85%;
+
+  --card: 0 0% 100%;
+
+  --card-foreground: 180 50% 15%;
+
+  --card-border: 180 15% 88%;
+
+  --sidebar: 180 15% 95%;
+
+  --sidebar-foreground: 180 50% 15%;
+
+  --sidebar-border: 180 20% 85%;
+
+  --sidebar-primary: 180 50% 50%;
+
+  --sidebar-primary-foreground: 0 0% 100%;
+
+  --sidebar-accent: 180 20% 92%;
+
+  --sidebar-accent-foreground: 180 50% 15%;
+
+  --sidebar-ring: 180 60% 55%;
+
+  --popover: 0 0% 100%;
+
+  --popover-foreground: 180 50% 15%;
+
+  --popover-border: 180 15% 88%;
+
+  --primary: 180 50% 50%;
+
+  --primary-foreground: 0 0% 100%;
+
+  --secondary: 180 15% 94%;
+
+  --secondary-foreground: 180 50% 15%;
+
+  --muted: 180 10% 96%;
+
+  --muted-foreground: 180 30% 40%;
+
+  --accent: 180 15% 93%;
+
+  --accent-foreground: 180 50% 15%;
+
+  --destructive: 0 70% 50%;
+
+  --destructive-foreground: 0 0% 100%;
+
+  --input: 180 15% 90%;
+  --ring: 180 60% 50%;
+  --chart-1: 180 65% 40%;
+  --chart-2: 142 70% 40%;
+  --chart-3: 210 80% 45%;
+  --chart-4: 38 92% 45%;
+  --chart-5: 280 60% 50%;
+
+  --font-sans: Inter, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif;
+  --font-serif: Georgia, serif;
+  --font-mono: JetBrains Mono, Fira Code, Consolas, monospace;
+  --radius: .25rem;
+  /* 4px */
+  --shadow-2xs: 0px 1px 2px 0px hsl(220 15% 12% / 0.05);
+  --shadow-xs: 0px 1px 3px 0px hsl(220 15% 12% / 0.10);
+  --shadow-sm: 0px 1px 2px 0px hsl(220 15% 12% / 0.06), 0px 1px 3px 0px hsl(220 15% 12% / 0.10);
+  --shadow: 0px 2px 4px -1px hsl(220 15% 12% / 0.06), 0px 4px 6px -1px hsl(220 15% 12% / 0.10);
+  --shadow-md: 0px 4px 6px -1px hsl(220 15% 12% / 0.10), 0px 2px 4px -1px hsl(220 15% 12% / 0.06);
+  --shadow-lg: 0px 10px 15px -3px hsl(220 15% 12% / 0.10), 0px 4px 6px -2px hsl(220 15% 12% / 0.05);
+  --shadow-xl: 0px 20px 25px -5px hsl(220 15% 12% / 0.10), 0px 10px 10px -5px hsl(220 15% 12% / 0.04);
+  --shadow-2xl: 0px 25px 50px -12px hsl(220 15% 12% / 0.25);
+  --tracking-normal: 0em;
+  --spacing: 0.25rem;
+
+  /* Automatically computed borders - intensity can be controlled by the user by the --opaque-button-border-intensity setting */
+
+  /* Fallback for older browsers */
+  --sidebar-primary-border: hsl(var(--sidebar-primary));
+  --sidebar-primary-border: hsl(from hsl(var(--sidebar-primary)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
+
+  /* Fallback for older browsers */
+  --sidebar-accent-border: hsl(var(--sidebar-accent));
+  --sidebar-accent-border: hsl(from hsl(var(--sidebar-accent)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
+
+  /* Fallback for older browsers */
+  --primary-border: hsl(var(--primary));
+  --primary-border: hsl(from hsl(var(--primary)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
+
+  /* Fallback for older browsers */
+  --secondary-border: hsl(var(--secondary));
+  --secondary-border: hsl(from hsl(var(--secondary)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
+
+  /* Fallback for older browsers */
+  --muted-border: hsl(var(--muted));
+  --muted-border: hsl(from hsl(var(--muted)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
+
+  /* Fallback for older browsers */
+  --accent-border: hsl(var(--accent));
+  --accent-border: hsl(from hsl(var(--accent)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
+
+  /* Fallback for older browsers */
+  --destructive-border: hsl(var(--destructive));
+  --destructive-border: hsl(from hsl(var(--destructive)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
+}
+
+.dark {
+  --button-outline: rgba(255, 255, 255, .10);
+  --badge-outline: rgba(255, 255, 255, .05);
+
+  --opaque-button-border-intensity: 9;
+  /* In terms of percentages */
+
+  /* Backgrounds applied on top of other backgrounds when hovered/active */
+  --elevate-1: rgba(255, 255, 255, .04);
+  --elevate-2: rgba(255, 255, 255, .09);
+
+  --background: 180 30% 10%;
+
+  --foreground: 180 15% 96%;
+
+  --border: 180 25% 22%;
+
+  --card: 180 25% 14%;
+
+  --card-foreground: 180 15% 96%;
+
+  --card-border: 180 20% 20%;
+
+  --sidebar: 180 25% 12%;
+
+  --sidebar-foreground: 180 15% 96%;
+
+  --sidebar-border: 180 20% 18%;
+
+  --sidebar-primary: 180 65% 50%;
+
+  --sidebar-primary-foreground: 180 30% 10%;
+
+  --sidebar-accent: 180 25% 18%;
+
+  --sidebar-accent-foreground: 180 15% 96%;
+
+  --sidebar-ring: 180 70% 55%;
+
+  --popover: 180 25% 16%;
+
+  --popover-foreground: 180 15% 96%;
+
+  --popover-border: 180 20% 24%;
+
+  --primary: 180 65% 50%;
+
+  --primary-foreground: 180 25% 12%;
+
+  --secondary: 220 12% 22%;
+
+  --secondary-foreground: 0 0% 98%;
+
+  --muted: 220 10% 20%;
+
+  --muted-foreground: 220 15% 85%;
+
+  --accent: 220 15% 24%;
+
+  --accent-foreground: 0 0% 98%;
+
+  --destructive: 0 70% 50%;
+
+  --destructive-foreground: 0 0% 100%;
+
+  --input: 220 10% 35%;
+  --ring: 180 65% 55%;
+  --chart-1: 180 65% 55%;
+  --chart-2: 142 70% 55%;
+  --chart-3: 210 80% 60%;
+  --chart-4: 38 92% 55%;
+  --chart-5: 280 60% 65%;
+
+  --shadow-2xs: 0px 1px 2px 0px hsl(0 0% 0% / 0.30);
+  --shadow-xs: 0px 1px 3px 0px hsl(0 0% 0% / 0.40);
+  --shadow-sm: 0px 1px 2px 0px hsl(0 0% 0% / 0.30), 0px 1px 3px 0px hsl(0 0% 0% / 0.40);
+  --shadow: 0px 2px 4px -1px hsl(0 0% 0% / 0.30), 0px 4px 6px -1px hsl(0 0% 0% / 0.40);
+  --shadow-md: 0px 4px 6px -1px hsl(0 0% 0% / 0.40), 0px 2px 4px -1px hsl(0 0% 0% / 0.30);
+  --shadow-lg: 0px 10px 15px -3px hsl(0 0% 0% / 0.40), 0px 4px 6px -2px hsl(0 0% 0% / 0.30);
+  --shadow-xl: 0px 20px 25px -5px hsl(0 0% 0% / 0.40), 0px 10px 10px -5px hsl(0 0% 0% / 0.30);
+  --shadow-2xl: 0px 25px 50px -12px hsl(0 0% 0% / 0.50);
+
+  /* Fallback for older browsers */
+  --sidebar-primary-border: hsl(var(--sidebar-primary));
+  --sidebar-primary-border: hsl(from hsl(var(--sidebar-primary)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
+
+  /* Fallback for older browsers */
+  --sidebar-accent-border: hsl(var(--sidebar-accent));
+  --sidebar-accent-border: hsl(from hsl(var(--sidebar-accent)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
+
+  /* Fallback for older browsers */
+  --primary-border: hsl(var(--primary));
+  --primary-border: hsl(from hsl(var(--primary)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
+
+  /* Fallback for older browsers */
+  --secondary-border: hsl(var(--secondary));
+  --secondary-border: hsl(from hsl(var(--secondary)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
+
+  /* Fallback for older browsers */
+  --muted-border: hsl(var(--muted));
+  --muted-border: hsl(from hsl(var(--muted)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
+
+  /* Fallback for older browsers */
+  --accent-border: hsl(var(--accent));
+  --accent-border: hsl(from hsl(var(--accent)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
+
+  /* Fallback for older browsers */
+  --destructive-border: hsl(var(--destructive));
+  --destructive-border: hsl(from hsl(var(--destructive)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply font-sans antialiased bg-background text-foreground;
+  }
+}
+
+/**
+ * Using the elevate system.
+ * Automatic contrast adjustment.
+ *
+ * <element className="hover-elevate" />
+ * <element className="active-elevate-2" />
+ *
+ * // Using the tailwind utility when a data attribute is "on"
+ * <element className="toggle-elevate data-[state=on]:toggle-elevated" />
+ * // Or manually controlling the toggle state
+ * <element className="toggle-elevate toggle-elevated" />
+ *
+ * Elevation systems have to handle many states.
+ * - not-hovered, vs. hovered vs. active  (three mutually exclusive states)
+ * - toggled or not
+ * - focused or not (this is not handled with these utilities)
+ *
+ * Even without handling focused or not, this is six possible combinations that
+ * need to be distinguished from eachother visually.
+ */
+@layer utilities {
+
+  /* Hide ugly search cancel button in Chrome until we can style it properly */
+  input[type="search"]::-webkit-search-cancel-button {
+    @apply hidden;
+  }
+
+  /* Placeholder styling for contentEditable div */
+  [contenteditable][data-placeholder]:empty::before {
+    content: attr(data-placeholder);
+    color: hsl(var(--muted-foreground));
+    pointer-events: none;
+  }
+
+  /* .no-default-hover-elevate/no-default-active-elevate is an escape hatch so consumers of
+   * buttons/badges can remove the automatic brightness adjustment on interactions
+   * and program their own. */
+  .no-default-hover-elevate {}
+
+  .no-default-active-elevate {}
+
+
+  /**
+   * Toggleable backgrounds go behind the content. Hoverable/active goes on top.
+   * This way they can stack/compound. Both will overlap the parent's borders!
+   * So borders will be automatically adjusted both on toggle, and hover/active,
+   * and they will be compounded.
+   */
+  .toggle-elevate::before,
+  .toggle-elevate-2::before {
+    content: "";
+    pointer-events: none;
+    position: absolute;
+    inset: 0px;
+    /*border-radius: inherit;   match rounded corners */
+    border-radius: inherit;
+    z-index: -1;
+    /* sits behind content but above backdrop */
+  }
+
+  .toggle-elevate.toggle-elevated::before {
+    background-color: var(--elevate-2);
+  }
+
+  /* If there's a 1px border, adjust the inset so that it covers that parent's border */
+  .border.toggle-elevate::before {
+    inset: -1px;
+  }
+
+  /* Does not work on elements with overflow:hidden! */
+  .hover-elevate:not(.no-default-hover-elevate),
+  .active-elevate:not(.no-default-active-elevate),
+  .hover-elevate-2:not(.no-default-hover-elevate),
+  .active-elevate-2:not(.no-default-active-elevate) {
+    position: relative;
+    z-index: 0;
+  }
+
+  .hover-elevate:not(.no-default-hover-elevate)::after,
+  .active-elevate:not(.no-default-active-elevate)::after,
+  .hover-elevate-2:not(.no-default-hover-elevate)::after,
+  .active-elevate-2:not(.no-default-active-elevate)::after {
+    content: "";
+    pointer-events: none;
+    position: absolute;
+    inset: 0px;
+    /*border-radius: inherit;   match rounded corners */
+    border-radius: inherit;
+    z-index: 999;
+    /* sits in front of content */
+  }
+
+  .hover-elevate:hover:not(.no-default-hover-elevate)::after,
+  .active-elevate:active:not(.no-default-active-elevate)::after {
+    background-color: var(--elevate-1);
+  }
+
+  .hover-elevate-2:hover:not(.no-default-hover-elevate)::after,
+  .active-elevate-2:active:not(.no-default-active-elevate)::after {
+    background-color: var(--elevate-2);
+  }
+
+  /* If there's a 1px border, adjust the inset so that it covers that parent's border */
+  .border.hover-elevate:not(.no-hover-interaction-elevate)::after,
+  .border.active-elevate:not(.no-active-interaction-elevate)::after,
+  .border.hover-elevate-2:not(.no-hover-interaction-elevate)::after,
+  .border.active-elevate-2:not(.no-active-interaction-elevate)::after,
+  .border.hover-elevate:not(.no-hover-interaction-elevate)::after {
+    inset: -1px;
+  }
+}
+
+/* RC Dock Custom Styles - Control Buttons */
+.dock-tab-btn {
+  display: inline-block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  width: auto !important;
+  height: auto !important;
+}
+
+/* Close button on tabs - MUST BE VISIBLE */
+.dock-tab-close-btn {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  visibility: visible !important;
+  width: 18px !important;
+  height: 18px !important;
+  min-width: 18px !important;
+  min-height: 18px !important;
+  margin-left: 6px !important;
+  opacity: 0.7 !important;
+  cursor: pointer !important;
+  position: relative !important;
+  transition: all 0.2s;
+  background: rgba(0, 0, 0, 0.05) !important;
+  border-radius: 3px !important;
+  flex-shrink: 0 !important;
+  color: hsl(var(--foreground)) !important;
+}
+
+.dock-tab-close-btn::before,
+.dock-tab-close-btn::after {
+  content: '' !important;
+  display: block !important;
+  position: absolute !important;
+  top: 50% !important;
+  left: 50% !important;
+  width: 10px !important;
+  height: 2px !important;
+  background-color: currentColor !important;
+  transform-origin: center !important;
+}
+
+.dock-tab-close-btn::before {
+  transform: translate(-50%, -50%) rotate(45deg) !important;
+}
+
+.dock-tab-close-btn::after {
+  transform: translate(-50%, -50%) rotate(-45deg) !important;
+}
+
+.dock-tab-close-btn:hover {
+  opacity: 1 !important;
+  background: hsla(var(--destructive) / 0.1) !important;
+  color: hsl(var(--destructive)) !important;
+}
+
+/* Maximize/Minimize button on panel - MUST BE VISIBLE (but not for emptyDock) */
+.dock-panel:not(:has([title="Empty dock"])) .dock-panel-max-btn,
+.dock-panel:not(:has([title="Empty dock"])) .dock-panel-min-btn,
+.dock-bar:not(:has([title="Empty dock"])) .dock-panel-max-btn,
+.dock-bar:not(:has([title="Empty dock"])) .dock-panel-min-btn,
+.dock-nav-operations:not(:has([title="Empty dock"])) .dock-panel-max-btn,
+.dock-nav-operations:not(:has([title="Empty dock"])) .dock-panel-min-btn {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  visibility: visible !important;
+  width: 20px !important;
+  height: 20px !important;
+  min-width: 20px !important;
+  min-height: 20px !important;
+  margin: 0 4px !important;
+  opacity: 0.7 !important;
+  cursor: pointer !important;
+  position: relative !important;
+  transition: opacity 0.2s, color 0.2s !important;
+  flex-shrink: 0 !important;
+  background: transparent !important;
+  color: hsl(var(--foreground)) !important;
+}
+
+.dock-panel-max-btn::before {
+  content: '' !important;
+  position: absolute !important;
+  top: 50% !important;
+  left: 50% !important;
+  width: 12px !important;
+  height: 12px !important;
+  border: 2px solid currentColor !important;
+  border-radius: 2px !important;
+  transform: translate(-50%, -50%) !important;
+}
+
+.dock-panel-min-btn::before {
+  content: '' !important;
+  position: absolute !important;
+  top: 50% !important;
+  left: 50% !important;
+  width: 10px !important;
+  height: 10px !important;
+  border: 2px solid currentColor !important;
+  border-radius: 2px !important;
+  transform: translate(-50%, -50%) !important;
+}
+
+.dock-panel-min-btn::after {
+  content: '' !important;
+  position: absolute !important;
+  top: calc(50% - 3px) !important;
+  left: calc(50% + 3px) !important;
+  width: 10px !important;
+  height: 10px !important;
+  border: 2px solid hsl(var(--card)) !important;
+  border-radius: 2px !important;
+  background: hsl(var(--card)) !important;
+  box-shadow: 0 0 0 2px currentColor !important;
+}
+
+.dock-hbox>.dock-divider {
+  transform: scaleX(0.8) !important;
+  cursor: ew-resize;
+}
+
+.dock-vbox>.dock-divider {
+  transform: scaleY(0.8) !important;
+  cursor: ns-resize;
+}
+
+.dock-panel-max-btn:hover,
+.dock-panel-min-btn:hover {
+  opacity: 1 !important;
+}
+
+.dock-nav-operations button {
+  display: inline-block !important;
+  visibility: visible !important;
+  opacity: 0.6 !important;
+  transition: opacity 0.2s;
+}
+
+.dock-nav-operations button:hover {
+  opacity: 1 !important;
+}
+
+.dock-bar {
+  background: hsl(var(--card)) !important;
+  border-bottom: 1px solid hsl(var(--border)) !important;
+}
+
+/* Ensure tab close button is visible inline with title */
+.dock-tab {
+  display: flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+}
+
+.dock-tab {
+  background: transparent !important;
+  border: none !important;
+  color: hsl(var(--foreground)) !important;
+}
+
+.dock-tab.dock-tab-active {
+  background: hsl(var(--background)) !important;
+  border-bottom: 2px solid hsl(var(--primary)) !important;
+}
+
+.dock-panel {
+  background: hsl(var(--card)) !important;
+  border: 1px solid hsl(var(--border)) !important;
+}
+
+.dock-divider {
+  background: hsl(var(--border)) !important;
+}
+
+.dock-divider:hover {
+  background: hsl(var(--primary) / 0.5) !important;
+}
+
+/* Mosaic Dock Manager Custom Styles */
+.mosaic-custom .mosaic-window {
+  box-shadow: none !important;
+}
+
+.mosaic-custom .mosaic-window-toolbar {
+  display: none !important;
+}
+
+.mosaic-custom .mosaic-window-body {
+  background: transparent !important;
+}
+
+.mosaic-custom .mosaic-tile {
+  margin: 0 !important;
+}
+
+.mosaic-custom .mosaic-split {
+  background-color: hsl(var(--border)) !important;
+}
+
+.mosaic-custom .mosaic-split:hover {
+  background-color: hsl(var(--primary) / 0.5) !important;
+}
+
+.mosaic-custom .mosaic-drop-target {
+  background: hsl(var(--primary) / 0.2) !important;
+  border: 2px dashed hsl(var(--primary)) !important;
+}
+
+.mosaic-custom .mosaic-preview {
+  background: hsl(var(--primary) / 0.3) !important;
+  border: 2px solid hsl(var(--primary)) !important;
+}
+
+/* Hide 3-dot panel menu button - Multiple selectors to ensure it's hidden */
+.dock-panel-more-btn,
+.dock-nav-more,
+.dock-nav .dock-nav-more,
+.dock-bar .dock-nav-more,
+button.dock-nav-more,
+.dock-nav-more::after,
+.dock-nav-more::before {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  width: 0 !important;
+  height: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  pointer-events: none !important;
+}
+
+/* Hide all control buttons (maximize, float, close) for emptyDock panel using custom class */
+.empty-dock-panel-no-controls .dock-nav-operations,
+.empty-dock-panel-no-controls .dock-panel-max-btn,
+.empty-dock-panel-no-controls .dock-panel-min-btn,
+.empty-dock-panel-no-controls .dock-extra-content,
+.empty-dock-panel-no-controls .panel-control-btn,
+.dock-panel.empty-dock-panel-no-controls .dock-nav-operations,
+.dock-panel.empty-dock-panel-no-controls .dock-bar .dock-nav-operations {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  width: 0 !important;
+  height: 0 !important;
+  pointer-events: none !important;
+}
+
+/* Ensure nav operations only show maximize/minimize buttons, not the more menu (except for emptyDock) */
+.dock-panel:not(:has([title="Empty dock"])) .dock-nav-operations {
+  display: flex !important;
+  gap: 4px !important;
+}
+
+
+/* RC Tabs (used internally by rc-dock) - Ensure tab text is always visible */
+.rc-tabs-tab-btn {
+  display: inline-block !important;
+  visibility: visible !important;
+  color: hsl(var(--foreground)) !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  padding: 8px 12px !important;
+  opacity: 0.7 !important;
+  transition: opacity 0.2s !important;
+}
+
+.rc-tabs-tab:hover .rc-tabs-tab-btn {
+  opacity: 1 !important;
+}
+
+.rc-tabs-tab-active .rc-tabs-tab-btn {
+  color: hsl(var(--foreground)) !important;
+  opacity: 1 !important;
+  font-weight: 600 !important;
+}
+
+.rc-tabs-nav {
+  background: hsl(var(--card)) !important;
+  border-bottom: 1px solid hsl(var(--border)) !important;
+}
+
+.rc-tabs-tab {
+  background: transparent !important;
+  border: none !important;
+}
+
+.rc-tabs-tab-active {
+  background: hsl(var(--background)) !important;
+  border-bottom: 2px solid hsl(var(--primary)) !important;
+}
+
+/* RC Dock Dark Mode Theme */
+.dock-dark-theme .dock-bar {
+  background: hsl(var(--card)) !important;
+  border-bottom: 1px solid hsl(var(--border)) !important;
+}
+
+/* RC Tabs dark mode */
+.dock-dark-theme .rc-tabs-tab-btn {
+  color: hsl(var(--muted-foreground)) !important;
+  opacity: 0.7 !important;
+}
+
+.dock-dark-theme .rc-tabs-tab:hover .rc-tabs-tab-btn {
+  color: hsl(var(--foreground)) !important;
+  opacity: 1 !important;
+}
+
+.dock-dark-theme .rc-tabs-tab-active .rc-tabs-tab-btn {
+  color: hsl(var(--foreground)) !important;
+  opacity: 1 !important;
+}
+
+.dock-dark-theme .rc-tabs-nav {
+  background: hsl(var(--card)) !important;
+  border-bottom: 1px solid hsl(var(--border)) !important;
+}
+
+.dock-dark-theme .dock-tab {
+  background: transparent !important;
+  border: none !important;
+  color: hsl(var(--muted-foreground)) !important;
+  opacity: 0.8 !important;
+}
+
+.dock-dark-theme .dock-tab:hover {
+  color: hsl(var(--foreground)) !important;
+  opacity: 1 !important;
+}
+
+.dock-dark-theme .dock-tab.dock-tab-active {
+  background: hsl(var(--background)) !important;
+  border-bottom: 2px solid hsl(var(--primary)) !important;
+  color: hsl(var(--foreground)) !important;
+  opacity: 1 !important;
+}
+
+.dock-dark-theme .dock-panel {
+  background: hsl(var(--background)) !important;
+  border: 1px solid hsl(var(--border)) !important;
+}
+
+.dock-dark-theme .dock-content {
+  background: hsl(var(--background)) !important;
+}
+
+.dock-dark-theme .dock-divider {
+  background: hsl(var(--border)) !important;
+  width: 8px !important;
+  height: 8px !important;
+}
+
+.dock-dark-theme .dock-divider:hover {
+  background: hsl(var(--primary) / 0.6) !important;
+}
+
+.dock-dark-theme .dock-divider-h {
+  width: 100% !important;
+  height: 8px !important;
+  cursor: row-resize !important;
+}
+
+.dock-dark-theme .dock-divider-v {
+  width: 8px !important;
+  height: 100% !important;
+  cursor: col-resize !important;
+}
+
+.dock-dark-theme .dock-panel-min-btn::after {
+  border: 2px solid hsl(var(--card)) !important;
+  background: hsl(var(--card)) !important;
+}
+
+/* Make rc-dock panel control icons white in dark mode */
+.dock-dark-theme .dock-panel-max-btn,
+.dock-dark-theme .dock-panel-min-btn,
+.dock-dark-theme .dock-bar .dock-panel-max-btn,
+.dock-dark-theme .dock-bar .dock-panel-min-btn,
+.dock-dark-theme .dock-nav-operations .dock-panel-max-btn,
+.dock-dark-theme .dock-nav-operations .dock-panel-min-btn {
+  color: #ffffff !important;
+  opacity: 0.7 !important;
+}
+
+.dock-dark-theme .dock-panel-max-btn:hover,
+.dock-dark-theme .dock-panel-min-btn:hover,
+.dock-dark-theme .dock-bar .dock-panel-max-btn:hover,
+.dock-dark-theme .dock-bar .dock-panel-min-btn:hover,
+.dock-dark-theme .dock-nav-operations .dock-panel-max-btn:hover,
+.dock-dark-theme .dock-nav-operations .dock-panel-min-btn:hover {
+  color: #ffffff !important;
+  opacity: 1 !important;
+}
+
+.dock-dark-theme .dock-tab-close-btn {
+  color: #ffffff !important;
+  background: rgba(255, 255, 255, 0.05) !important;
+}
+
+.dock-dark-theme .dock-tab-close-btn:hover {
+  color: hsl(var(--destructive)) !important;
+  background: hsla(var(--destructive) / 0.2) !important;
+}
+
+/* RC tabs nav icons in dark mode */
+.dock-dark-theme .rc-tabs-nav-more,
+.dock-dark-theme .rc-tabs-nav-add {
+  color: rgba(255, 255, 255, 0.7) !important;
+}
+
+.dock-dark-theme .rc-tabs-nav-more:hover,
+.dock-dark-theme .rc-tabs-nav-add:hover {
+  color: rgba(255, 255, 255, 1) !important;
+}
+
+/* RC Dock Light Mode Theme */
+.dock-light-theme .dock-bar {
+  background: hsl(var(--card)) !important;
+  border-bottom: 1px solid hsl(var(--border)) !important;
+}
+
+/* RC Tabs light mode */
+.dock-light-theme .rc-tabs-tab-btn {
+  color: hsl(var(--foreground)) !important;
+  opacity: 0.7 !important;
+}
+
+.dock-light-theme .rc-tabs-tab:hover .rc-tabs-tab-btn {
+  opacity: 1 !important;
+}
+
+.dock-light-theme .rc-tabs-tab-active .rc-tabs-tab-btn {
+  color: hsl(var(--foreground)) !important;
+  opacity: 1 !important;
+}
+
+.dock-light-theme .rc-tabs-nav {
+  background: hsl(var(--card)) !important;
+  border-bottom: 1px solid hsl(var(--border)) !important;
+}
+
+.dock-light-theme .dock-tab {
+  background: transparent !important;
+  border: none !important;
+  color: hsl(var(--foreground)) !important;
+}
+
+.dock-light-theme .dock-tab.dock-tab-active {
+  background: hsl(var(--background)) !important;
+  border-bottom: 2px solid hsl(var(--primary)) !important;
+}
+
+.dock-light-theme .dock-panel {
+  background: hsl(var(--card)) !important;
+  border: 1px solid hsl(var(--border)) !important;
+}
+
+.dock-light-theme .dock-divider {
+  background: hsl(var(--border)) !important;
+  width: 8px !important;
+  height: 8px !important;
+}
+
+.dock-light-theme .dock-divider:hover {
+  background: hsl(var(--primary) / 0.5) !important;
+}
+
+.dock-light-theme .dock-divider-h {
+  width: 100% !important;
+  height: 8px !important;
+  cursor: row-resize !important;
+}
+
+.dock-light-theme .dock-divider-v {
+  width: 8px !important;
+  height: 100% !important;
+  cursor: col-resize !important;
+}
+
+/* Floating window styles */
+.dock-box.dock-box-float {
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2) !important;
+  border-radius: 8px !important;
+  overflow: hidden !important;
+}
+
+.dark .dock-box.dock-box-float {
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5) !important;
+}
+
+/* Ensure Plotly shapes (track borders) are visible - target all SVG shape elements */
+.js-plotly-plot .shapelayer path,
+.js-plotly-plot .shapelayer line,
+.js-plotly-plot .shapelayer rect,
+svg.main-svg .shapelayer path,
+svg.main-svg .shapelayer line,
+svg.main-svg .shapelayer rect,
+g.shapelayer path,
+g.shapelayer line,
+g.shapelayer rect {
+  stroke: #000 !important;
+  stroke-width: 2 !important;
+  vector-effect: non-scaling-stroke !important;
+  fill: none !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
