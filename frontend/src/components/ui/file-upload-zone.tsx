@@ -24,6 +24,7 @@ interface FileUploadZoneProps {
   disabled?: boolean;
   className?: string;
   allowFolders?: boolean;
+  showFileList?: boolean;
 }
 
 export function FileUploadZone({
@@ -39,7 +40,8 @@ export function FileUploadZone({
   onFilesRejected,
   disabled = false,
   className,
-  allowFolders = false
+  allowFolders = false,
+  showFileList = true
 }: FileUploadZoneProps) {
   const maxSize = maxSizeMB * 1024 * 1024;
 
@@ -137,7 +139,7 @@ export function FileUploadZone({
         </div>
       </div>
 
-      {files.length > 0 && (
+      {showFileList && files.length > 0 && (
         <div className="space-y-2">
           <p className="text-sm font-medium">
             {files.length} {files.length === 1 ? 'file' : 'files'} selected

@@ -593,33 +593,34 @@ export default function NewWellDialog({
               onFilesAccepted={handleLasFolderFilesAccepted}
               disabled={isUploading}
               allowFolders={true}
+              showFileList={false}
             />
 
             {batchPreview && batchPreview.files && batchPreview.files.length > 0 && (
-              <div className="bg-muted p-4 rounded-lg text-sm space-y-3 max-h-96 overflow-y-auto">
-                <div className="font-medium text-green-600">
+              <div className="bg-muted rounded-lg text-sm space-y-3">
+                <div className="p-4 pb-2 font-medium text-green-600 sticky top-0 bg-muted z-10">
                   ✓ Preview Ready: {batchPreview.validFiles} valid, {batchPreview.duplicates} existing, {batchPreview.errors} errors
                 </div>
                 
-                <div className="space-y-2">
+                <div className="space-y-2 max-h-[500px] overflow-y-auto px-4 pb-4">
                   {batchPreview.files.map((file: any, idx: number) => (
                     <div
                       key={idx}
                       className={`p-3 rounded border ${
                         file.validationErrors && file.validationErrors.length > 0
-                          ? 'border-red-300 bg-red-50'
+                          ? 'border-red-300 bg-red-50 dark:bg-red-950 dark:border-red-800'
                           : file.isDuplicate
-                          ? 'border-yellow-300 bg-yellow-50'
-                          : 'border-green-300 bg-green-50'
+                          ? 'border-yellow-300 bg-yellow-50 dark:bg-yellow-950 dark:border-yellow-800'
+                          : 'border-green-300 bg-green-50 dark:bg-green-950 dark:border-green-800'
                       }`}
                     >
                       <div className="flex items-start justify-between">
                         <div className="flex-1">
                           <p className="font-medium text-xs">
                             {file.filename}
-                            {file.isDuplicate && <span className="ml-2 text-yellow-700">(Will Update Existing)</span>}
+                            {file.isDuplicate && <span className="ml-2 text-yellow-700 dark:text-yellow-400">(Will Update Existing)</span>}
                             {file.validationErrors && file.validationErrors.length > 0 && (
-                              <span className="ml-2 text-red-700">(Error)</span>
+                              <span className="ml-2 text-red-700 dark:text-red-400">(Error)</span>
                             )}
                           </p>
                           {file.wellName && (
@@ -630,7 +631,7 @@ export default function NewWellDialog({
                             </p>
                           )}
                           {file.validationErrors && file.validationErrors.length > 0 && (
-                            <div className="mt-1 text-xs text-red-600">
+                            <div className="mt-1 text-xs text-red-600 dark:text-red-400">
                               {file.validationErrors.map((err: string, i: number) => (
                                 <div key={i}>• {err}</div>
                               ))}
