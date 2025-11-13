@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, ConfigDict
-from typing import Optional, List, Any
+from typing import Optional, List, Any, Literal
 from datetime import datetime
 
 
@@ -309,3 +309,65 @@ class LayoutListResponse(CustomBase):
     success: bool
     layouts: List[str]
     message: Optional[str] = None
+
+
+class LASBatchPreviewItem(CustomBase):
+    filename: str
+    fileSize: int
+    wellName: Optional[str] = None
+    company: Optional[str] = None
+    location: Optional[str] = None
+    startDepth: Optional[float] = None
+    stopDepth: Optional[float] = None
+    curveNames: List[str] = []
+    dataPoints: int = 0
+    isDuplicate: bool = False
+    validationErrors: List[str] = []
+    tempFileId: Optional[str] = None
+
+
+class LASBatchPreviewResponse(CustomBase):
+    success: bool
+    message: str
+    files: List[LASBatchPreviewItem]
+    totalFiles: int
+    validFiles: int
+    duplicates: int
+    errors: int
+
+
+class LASBatchImportFileRef(CustomBase):
+    tempFileId: str
+    datasetName: Optional[str] = None
+    datasetType: Optional[str] = "CONTINUOUS"
+
+
+class LASBatchImportRequest(CustomBase):
+    projectPath: str
+    files: List[LASBatchImportFileRef]
+    defaultDatasetType: Optional[str] = "CONTINUOUS"
+    defaultDatasetSuffix: Optional[str] = ""
+
+
+class LASBatchImportFileResult(CustomBase):
+    filename: str
+    wellName: Optional[str] = None
+    status: Literal["created", "updated", "failed"]
+    message: str
+    datasetName: Optional[str] = None
+    error: Optional[str] = None
+
+
+class LASBatchImportSummary(CustomBase):
+    totalFiles: int
+    wellsCreated: int
+    wellsUpdated: int
+    datasetsAdded: int
+    failed: int
+
+
+class LASBatchImportResponse(CustomBase):
+    success: bool
+    message: str
+    results: List[LASBatchImportFileResult]
+    summary: LASBatchImportSummary

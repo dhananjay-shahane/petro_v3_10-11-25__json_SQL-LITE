@@ -4,8 +4,12 @@ import traceback
 import shutil
 import lasio
 import hashlib
+import json
+import time
 from pathlib import Path
 from datetime import datetime
+from uuid import uuid4
+from typing import List
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from werkzeug.utils import secure_filename
 
@@ -13,7 +17,9 @@ from models import (
     LASPreviewRequest, LASPreviewResponse, WellCreateResponse,
     WellLoadResponse, WellDataResponse, DatasetDetailsResponse,
     WellListResponse, WellDatasetsResponse, LogPlotRequest,
-    LogPlotResponse, CrossPlotRequest, CrossPlotResponse, LogMessage
+    LogPlotResponse, CrossPlotRequest, CrossPlotResponse, LogMessage,
+    LASBatchPreviewItem, LASBatchPreviewResponse, LASBatchImportRequest,
+    LASBatchImportFileResult, LASBatchImportSummary, LASBatchImportResponse
 )
 from dependencies import (
     WORKSPACE_ROOT, validate_path, allowed_file, sanitize_list
@@ -25,6 +31,7 @@ from utils.cpi_plotly import CPIPlotlyManager
 from utils.matplotlib_cpi_plot import MatplotlibCPIPlotter
 from utils.file_well_storage import get_file_well_storage
 from utils.sqlite_storage import SQLiteStorageService
+from utils.data_import_export import ImportLasFileCommand
 
 # Keep SQLite for non-well data (sessions, projects, etc.)
 session_storage = SQLiteStorageService()
@@ -106,6 +113,52 @@ def fetch_well_data(project_path: str, well_id: str):
     store_well_in_session(well_file, well_data)
     
     return well, well_data
+
+
+def get_batch_session_dir(session_id: str) -> Path:
+    """Get the temp directory for a batch session"""
+    batch_root = Path(WORKSPACE_ROOT) / ".tmp" / "las-batch"
+    session_dir = batch_root / session_id
+    session_dir.mkdir(parents=True, exist_ok=True)
+    return session_dir
+
+
+def save_batch_metadata(session_id: str, metadata: dict):
+    """Save metadata for a batch session"""
+    session_dir = get_batch_session_dir(session_id)
+    metadata_file = session_dir / "metadata.json"
+    with open(metadata_file, 'w') as f:
+        json.dump(metadata, f)
+
+
+def load_batch_metadata(session_id: str) -> dict:
+    """Load metadata for a batch session"""
+    session_dir = get_batch_session_dir(session_id)
+    metadata_file = session_dir / "metadata.json"
+    if metadata_file.exists():
+        with open(metadata_file, 'r') as f:
+            return json.load(f)
+    return {}
+
+
+def cleanup_old_batch_sessions(ttl_hours: int = 1):
+    """Remove batch session directories older than TTL"""
+    batch_root = Path(WORKSPACE_ROOT) / ".tmp" / "las-batch"
+    if not batch_root.exists():
+        return
+    
+    now = time.time()
+    ttl_seconds = ttl_hours * 3600
+    
+    for session_dir in batch_root.iterdir():
+        if session_dir.is_dir():
+            dir_age = now - session_dir.stat().st_mtime
+            if dir_age > ttl_seconds:
+                try:
+                    shutil.rmtree(session_dir)
+                    print(f"[Cleanup] Removed old batch session: {session_dir.name}")
+                except Exception as e:
+                    print(f"[Cleanup] Failed to remove {session_dir.name}: {e}")
 
 
 @router.post("/preview-las", response_model=LASPreviewResponse)
@@ -414,6 +467,307 @@ async def create_from_las(
     except Exception as e:
         traceback.print_exc()
         logs.append({"message": f"ERROR: {str(e)}", "type": "error"})
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/preview-las-batch", response_model=LASBatchPreviewResponse)
+async def preview_las_batch(
+    projectPath: str = Form(...),
+    files: List[UploadFile] = File(...)
+):
+    """Preview multiple LAS files before importing"""
+    cleanup_old_batch_sessions()
+    
+    if not projectPath:
+        raise HTTPException(status_code=400, detail="Project path is required")
+    
+    resolved_project_path = os.path.abspath(projectPath)
+    if not validate_path(resolved_project_path):
+        raise HTTPException(status_code=403, detail="Access denied: path outside workspace")
+    
+    if not os.path.exists(resolved_project_path):
+        raise HTTPException(status_code=404, detail="Project path does not exist")
+    
+    session_id = get_project_session_id(projectPath)
+    session_dir = get_batch_session_dir(session_id)
+    
+    MAX_FILE_SIZE = 500 * 1024 * 1024  # 500 MB
+    MAX_FILES = 100
+    
+    if len(files) > MAX_FILES:
+        raise HTTPException(status_code=400, detail=f"Too many files. Maximum is {MAX_FILES}")
+    
+    preview_items = []
+    metadata = {}
+    total_files = len(files)
+    valid_files = 0
+    duplicates = 0
+    errors = 0
+    
+    wells_folder = os.path.join(resolved_project_path, "10-WELLS")
+    os.makedirs(wells_folder, exist_ok=True)
+    
+    for file in files:
+        item = LASBatchPreviewItem(
+            filename=file.filename or "unknown.las",
+            fileSize=0,
+            validationErrors=[]
+        )
+        
+        try:
+            if not file.filename or not (file.filename.lower().endswith('.las')):
+                item.validationErrors.append("Invalid file type. Only .las files allowed")
+                errors += 1
+                preview_items.append(item)
+                continue
+            
+            filename = secure_filename(file.filename)
+            temp_file_id = f"{session_id}:{uuid4()}"
+            temp_file_path = session_dir / f"{uuid4()}.las"
+            
+            total_size = 0
+            with open(temp_file_path, 'wb') as f:
+                while True:
+                    chunk = await file.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    total_size += len(chunk)
+                    if total_size > MAX_FILE_SIZE:
+                        item.validationErrors.append(f"File too large ({total_size // (1024 * 1024)} MB). Max is 500 MB")
+                        errors += 1
+                        temp_file_path.unlink()
+                        break
+                    f.write(chunk)
+            
+            if item.validationErrors:
+                preview_items.append(item)
+                continue
+            
+            item.fileSize = total_size
+            
+            try:
+                las = lasio.read(str(temp_file_path))
+                
+                well_name = None
+                for key in ['WELL', 'well', 'Well']:
+                    if hasattr(las.well, key):
+                        well_obj = getattr(las.well, key)
+                        if well_obj and well_obj.value:
+                            well_name = str(well_obj.value).strip()
+                            break
+                
+                if not well_name:
+                    for item_obj in las.well:
+                        if item_obj.mnemonic.upper() == 'WELL' and item_obj.value:
+                            well_name = str(item_obj.value).strip()
+                            break
+                
+                if not well_name:
+                    item.validationErrors.append("No WELL name found in LAS header")
+                    errors += 1
+                else:
+                    item.wellName = well_name
+                    
+                    well_file = os.path.join(wells_folder, f"{well_name}.ptrc")
+                    if os.path.exists(well_file):
+                        item.isDuplicate = True
+                        duplicates += 1
+                    
+                    company = None
+                    location = None
+                    for item_obj in las.well:
+                        if item_obj.mnemonic.upper() in ['COMP', 'COMPANY']:
+                            company = str(item_obj.value)
+                        elif item_obj.mnemonic.upper() in ['LOC', 'LOCATION', 'LOCA']:
+                            location = str(item_obj.value)
+                    
+                    item.company = company
+                    item.location = location
+                    
+                    if hasattr(las, 'curves'):
+                        item.curveNames = [c.mnemonic for c in las.curves]
+                    
+                    if hasattr(las, 'data') and las.data is not None:
+                        item.dataPoints = len(las.data)
+                    
+                    if hasattr(las.well, 'START'):
+                        item.startDepth = float(las.well.START.value) if las.well.START.value else None
+                    if hasattr(las.well, 'STOP'):
+                        item.stopDepth = float(las.well.STOP.value) if las.well.STOP.value else None
+                    
+                    item.tempFileId = temp_file_id
+                    metadata[temp_file_id] = {
+                        "filename": filename,
+                        "temp_path": str(temp_file_path),
+                        "well_name": well_name
+                    }
+                    valid_files += 1
+                    
+            except Exception as parse_error:
+                item.validationErrors.append(f"Failed to parse LAS file: {str(parse_error)}")
+                errors += 1
+                if temp_file_path.exists():
+                    temp_file_path.unlink()
+                    
+        except Exception as e:
+            item.validationErrors.append(f"Error processing file: {str(e)}")
+            errors += 1
+        
+        preview_items.append(item)
+    
+    save_batch_metadata(session_id, metadata)
+    
+    return {
+        "success": True,
+        "message": f"Previewed {total_files} files: {valid_files} valid, {duplicates} duplicates, {errors} errors",
+        "files": preview_items,
+        "totalFiles": total_files,
+        "validFiles": valid_files,
+        "duplicates": duplicates,
+        "errors": errors
+    }
+
+
+@router.post("/import-las-batch", response_model=LASBatchImportResponse)
+async def import_las_batch(request: LASBatchImportRequest):
+    """Import multiple LAS files that were previously previewed"""
+    try:
+        projectPath = request.projectPath
+        
+        if not projectPath:
+            raise HTTPException(status_code=400, detail="Project path is required")
+        
+        resolved_project_path = os.path.abspath(projectPath)
+        if not validate_path(resolved_project_path):
+            raise HTTPException(status_code=403, detail="Access denied: path outside workspace")
+        
+        if not os.path.exists(resolved_project_path):
+            raise HTTPException(status_code=404, detail="Project path does not exist")
+        
+        session_id = get_project_session_id(projectPath)
+        metadata = load_batch_metadata(session_id)
+        
+        if not metadata:
+            raise HTTPException(status_code=400, detail="No preview metadata found. Please preview files first")
+        
+        results = []
+        wells_created = set()
+        wells_updated = set()
+        datasets_added = 0
+        failed = 0
+        
+        for file_ref in request.files:
+            temp_file_id = file_ref.tempFileId
+            file_meta = metadata.get(temp_file_id)
+            
+            if not file_meta:
+                results.append(LASBatchImportFileResult(
+                    filename=temp_file_id,
+                    status="failed",
+                    message="File metadata not found",
+                    error="Preview data expired or not found"
+                ))
+                failed += 1
+                continue
+            
+            filename = file_meta["filename"]
+            temp_path = file_meta["temp_path"]
+            
+            if not os.path.exists(temp_path):
+                results.append(LASBatchImportFileResult(
+                    filename=filename,
+                    status="failed",
+                    message="Temp file not found",
+                    error="File may have been cleaned up"
+                ))
+                failed += 1
+                continue
+            
+            dataset_type_map = {
+                "CONTINUOUS": "Cont",
+                "POINT": "Point"
+            }
+            
+            dataset_type = file_ref.datasetType or request.defaultDatasetType or "CONTINUOUS"
+            normalized_type = dataset_type_map.get(dataset_type.upper(), "Cont")
+            
+            dataset_suffix = file_ref.datasetName or request.defaultDatasetSuffix or ''
+            
+            # Use ImportLasFileCommand from data_import_export.py
+            las_import_cmd = ImportLasFileCommand()
+            context = {'project_path': resolved_project_path}
+            args = {
+                'las_file_path': temp_path,
+                'suffix': dataset_suffix
+            }
+            
+            success, message, result = las_import_cmd.execute(args, context)
+            
+            if success and result:
+                well_name = result.get('well_name')
+                was_created = result.get('well_created', False)
+                dataset_name = result.get('dataset_name', '')
+                
+                if was_created:
+                    wells_created.add(well_name)
+                else:
+                    wells_updated.add(well_name)
+                
+                datasets_added += 1
+                
+                results.append(LASBatchImportFileResult(
+                    filename=filename,
+                    wellName=well_name,
+                    status="created" if was_created else "updated",
+                    message=message,
+                    datasetName=dataset_name
+                ))
+                
+                try:
+                    if os.path.exists(temp_path):
+                        os.unlink(temp_path)
+                except Exception as cleanup_err:
+                    print(f"Warning: Failed to cleanup temp file {temp_path}: {cleanup_err}")
+                    
+            else:
+                results.append(LASBatchImportFileResult(
+                    filename=filename,
+                    status="failed",
+                    message="Import failed",
+                    error=message
+                ))
+                failed += 1
+        
+        summary = LASBatchImportSummary(
+            totalFiles=len(request.files),
+            wellsCreated=len(wells_created),
+            wellsUpdated=len(wells_updated),
+            datasetsAdded=datasets_added,
+            failed=failed
+        )
+        
+        success_count = len(wells_created) + len(wells_updated)
+        message_parts = [
+            f"Imported {success_count}/{len(request.files)} files successfully"
+        ]
+        if wells_created:
+            message_parts.append(f"{len(wells_created)} wells created")
+        if wells_updated:
+            message_parts.append(f"{len(wells_updated)} wells updated")
+        if failed:
+            message_parts.append(f"{failed} failed")
+        
+        return {
+            "success": success_count > 0,
+            "message": ", ".join(message_parts),
+            "results": results,
+            "summary": summary
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 

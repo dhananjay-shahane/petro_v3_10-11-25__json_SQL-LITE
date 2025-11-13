@@ -30,11 +30,13 @@ export default function NewWellDialog({
 }: NewWellDialogProps) {
   const [csvFile, setCsvFile] = useState<File | null>(null);
   const [lasFile, setLasFile] = useState<File | null>(null);
+  const [lasFiles, setLasFiles] = useState<File[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [lasPreview, setLasPreview] = useState<any>(null);
+  const [batchPreview, setBatchPreview] = useState<any>(null);
   const [setName, setSetName] = useState<string>("");
   const [datasetType, setDatasetType] = useState<string>("CONTINUOUS");
-  const { toast } = useToast();
+  const { toast} = useToast();
 
   const handleCsvUpload = async () => {
     if (!csvFile) {
@@ -192,11 +194,138 @@ export default function NewWellDialog({
     }
   };
 
+  const handleBatchLasPreview = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    
+    if (!projectPath || projectPath === "No path selected") {
+      toast({
+        title: "Error",
+        description: "No project is currently open. Please open or create a project first.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsUploading(true);
+    
+    try {
+      const formData = new FormData();
+      formData.append("projectPath", projectPath);
+      
+      for (let i = 0; i < files.length; i++) {
+        formData.append("files", files[i]);
+      }
+      
+      const response = await fetch("/api/wells/preview-las-batch", {
+        method: "POST",
+        body: formData,
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || "Failed to preview LAS files");
+      }
+      
+      const result = await response.json();
+      setBatchPreview(result);
+      setLasFiles(Array.from(files));
+      
+      toast({
+        title: "Preview Ready",
+        description: `${result.validFiles} of ${result.totalFiles} files ready to import`,
+      });
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to preview LAS files",
+        variant: "destructive",
+      });
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const handleBatchLasImport = async () => {
+    if (!batchPreview || !batchPreview.files || batchPreview.files.length === 0) {
+      toast({
+        title: "Error",
+        description: "No files to import. Please select files first.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsUploading(true);
+
+    try {
+      const validFiles = batchPreview.files.filter((f: any) => f.tempFileId && f.validationErrors.length === 0);
+      
+      if (validFiles.length === 0) {
+        throw new Error("No valid files to import");
+      }
+
+      const importRequest = {
+        projectPath: projectPath,
+        files: validFiles.map((f: any) => ({
+          tempFileId: f.tempFileId,
+          datasetType: datasetType,
+        })),
+        defaultDatasetType: datasetType,
+        defaultDatasetSuffix: "",
+      };
+
+      const response = await fetch("/api/wells/import-las-batch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(importRequest),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || "Failed to import LAS files");
+      }
+
+      const result = await response.json();
+
+      toast({
+        title: "Success",
+        description: result.message,
+      });
+
+      if (result.results && result.results.length > 0 && onWellCreated) {
+        result.results.forEach((res: any) => {
+          if (res.status !== "failed" && res.wellName) {
+            onWellCreated({
+              id: res.wellName,
+              name: res.wellName,
+              path: `${projectPath}/10-WELLS/${res.wellName}.ptrc`,
+            });
+          }
+        });
+      }
+
+      setLasFiles([]);
+      setBatchPreview(null);
+      setDatasetType("CONTINUOUS");
+      onOpenChange(false);
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to import LAS files",
+        variant: "destructive",
+      });
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
   const handleDialogClose = (open: boolean) => {
     if (!open && !isUploading) {
       setCsvFile(null);
       setLasFile(null);
+      setLasFiles([]);
       setLasPreview(null);
+      setBatchPreview(null);
       setSetName("");
       setDatasetType("CONTINUOUS");
     }
@@ -284,11 +413,72 @@ export default function NewWellDialog({
           </DialogDescription>
         </DialogHeader>
         
-        <Tabs defaultValue="las" className="w-full">
-          <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="las">Upload LAS</TabsTrigger>
+        <Tabs defaultValue="help" className="w-full">
+          <TabsList className="grid w-full grid-cols-4">
+            <TabsTrigger value="help">Help</TabsTrigger>
+            <TabsTrigger value="las">Load LAS</TabsTrigger>
+            <TabsTrigger value="las-folder">Load LAS Folder</TabsTrigger>
             <TabsTrigger value="csv">Upload CSV</TabsTrigger>
           </TabsList>
+          
+          <TabsContent value="help" className="space-y-4 pt-4">
+            <div className="bg-muted p-6 rounded-lg space-y-4">
+              <h3 className="font-bold text-lg">Load Well - Help & Information</h3>
+              
+              <div className="space-y-3">
+                <div>
+                  <p className="font-semibold text-sm mb-2">📁 Load LAS (Single File)</p>
+                  <p className="text-sm text-muted-foreground">
+                    Upload a single LAS file to create a new well or add a dataset to an existing well. 
+                    The well name is automatically extracted from the LAS file header.
+                  </p>
+                </div>
+
+                <div>
+                  <p className="font-semibold text-sm mb-2">📂 Load LAS Folder (Multiple Files)</p>
+                  <p className="text-sm text-muted-foreground">
+                    Select multiple LAS files at once. Each file will be processed individually:
+                  </p>
+                  <ul className="list-disc list-inside text-sm text-muted-foreground ml-4 mt-1 space-y-1">
+                    <li>If well exists: Dataset is added to existing well</li>
+                    <li>If well doesn't exist: New well is created</li>
+                    <li>Preview shows which wells will be created/updated</li>
+                  </ul>
+                </div>
+
+                <div>
+                  <p className="font-semibold text-sm mb-2">📄 Upload CSV (Batch Well Creation)</p>
+                  <p className="text-sm text-muted-foreground">
+                    Upload a CSV file with well information to create multiple wells at once.
+                  </p>
+                </div>
+
+                <div className="pt-3 border-t border-border">
+                  <p className="font-semibold text-sm mb-2">📊 LAS File Requirements</p>
+                  <ul className="list-disc list-inside text-sm text-muted-foreground space-y-1">
+                    <li>File must have .las or .LAS extension</li>
+                    <li>Must contain WELL name in header section</li>
+                    <li>Maximum file size: 500 MB (recommended: up to 50 MB)</li>
+                    <li>Well data saved as JSON in 10-WELLS folder with .ptrc extension</li>
+                    <li>Original LAS files copied to 02-INPUT_LAS_FOLDER</li>
+                  </ul>
+                </div>
+
+                <div className="pt-3 border-t border-border">
+                  <p className="font-semibold text-sm mb-2">💾 Storage Information</p>
+                  <p className="text-sm text-muted-foreground">
+                    Wells are stored as individual JSON files with .ptrc extension in the project's 10-WELLS folder. 
+                    This allows for efficient loading and in-memory caching using LRU (Least Recently Used) algorithm.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="text-sm text-muted-foreground">
+              <p className="font-medium">Current Project:</p>
+              <p className="font-mono text-xs mt-1">{projectPath || "No project selected"}</p>
+            </div>
+          </TabsContent>
           
           <TabsContent value="las" className="space-y-4 pt-4">
             <div className="grid gap-2">
@@ -310,41 +500,7 @@ export default function NewWellDialog({
               )}
             </div>
 
-            <div className="grid gap-4">
-              <div className="grid gap-2">
-                <Label htmlFor="set-name">Dataset Name (Optional)</Label>
-                <Input
-                  id="set-name"
-                  type="text"
-                  placeholder="e.g., MAIN, SPLICE, etc. (leave blank to use SET from LAS file)"
-                  value={setName}
-                  onChange={(e) => setSetName(e.target.value)}
-                  disabled={isUploading}
-                />
-                <p className="text-xs text-muted-foreground">
-                  Custom dataset name. If blank, will use SET parameter from LAS file or default to "MAIN"
-                </p>
-              </div>
-
-              <div className="grid gap-2">
-                <Label htmlFor="dataset-type">Dataset Type</Label>
-                <select
-                  id="dataset-type"
-                  value={datasetType}
-                  onChange={(e) => setDatasetType(e.target.value)}
-                  disabled={isUploading}
-                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <option value="CONTINUOUS">Continuous (evenly spaced depth intervals)</option>
-                  <option value="POINT">Point (variable interval sampling)</option>
-                </select>
-                <p className="text-xs text-muted-foreground">
-                  Select "Point" for datasets where the index log is sampled at variable intervals
-                </p>
-              </div>
-            </div>
-
-            {lasPreview ? (
+            {lasPreview && (
               <div className="bg-muted p-4 rounded-lg text-sm space-y-2">
                 <p className="font-medium text-green-600">✓ LAS File Parsed Successfully</p>
                 <div className="grid grid-cols-2 gap-2 text-xs">
@@ -366,22 +522,6 @@ export default function NewWellDialog({
                   <div className="col-span-2">
                     <span className="font-medium">Data Points:</span> {lasPreview.dataPoints || 0} rows
                   </div>
-                </div>
-              </div>
-            ) : (
-              <div className="bg-muted p-4 rounded-lg text-sm">
-                <p className="font-medium mb-2">LAS File Upload:</p>
-                <p className="text-muted-foreground mb-2">Upload a LAS (Log ASCII Standard) file to create a well:</p>
-                <ul className="list-disc list-inside text-muted-foreground space-y-1">
-                  <li>The well name will be extracted from the LAS file header</li>
-                  <li>Well log data and curves will be parsed automatically</li>
-                  <li>Data will be saved in JSON format in the 10-WELLS folder</li>
-                  <li>LAS file will be copied to 02-INPUT_LAS_FOLDER</li>
-                </ul>
-                <div className="mt-3 pt-3 border-t border-border">
-                  <p className="font-semibold text-foreground">📊 File Size Limits:</p>
-                  <p className="text-muted-foreground mt-1">• Recommended: Up to 50 MB for optimal performance</p>
-                  <p className="text-muted-foreground">• Maximum: 500 MB (larger files may take longer to process)</p>
                 </div>
               </div>
             )}
@@ -407,6 +547,104 @@ export default function NewWellDialog({
               <Button onClick={handleLasUpload} disabled={isUploading || !lasFile}>
                 <Upload className="w-4 h-4 mr-2" />
                 {isUploading ? "Uploading..." : "Upload LAS File"}
+              </Button>
+            </DialogFooter>
+          </TabsContent>
+          
+          <TabsContent value="las-folder" className="space-y-4 pt-4">
+            <div className="grid gap-2">
+              <Label htmlFor="las-files">Select Multiple LAS Files</Label>
+              <div className="flex items-center gap-2">
+                <Input
+                  id="las-files"
+                  type="file"
+                  accept=".las,.LAS"
+                  multiple
+                  onChange={(e) => handleBatchLasPreview(e.target.files)}
+                  disabled={isUploading}
+                  className="cursor-pointer"
+                />
+              </div>
+              {lasFiles.length > 0 && (
+                <p className="text-sm text-muted-foreground">
+                  Selected: {lasFiles.length} file(s)
+                </p>
+              )}
+            </div>
+
+            {batchPreview && batchPreview.files && batchPreview.files.length > 0 && (
+              <div className="bg-muted p-4 rounded-lg text-sm space-y-3 max-h-96 overflow-y-auto">
+                <div className="font-medium text-green-600">
+                  ✓ Preview Ready: {batchPreview.validFiles} valid, {batchPreview.duplicates} existing, {batchPreview.errors} errors
+                </div>
+                
+                <div className="space-y-2">
+                  {batchPreview.files.map((file: any, idx: number) => (
+                    <div
+                      key={idx}
+                      className={`p-3 rounded border ${
+                        file.validationErrors && file.validationErrors.length > 0
+                          ? 'border-red-300 bg-red-50'
+                          : file.isDuplicate
+                          ? 'border-yellow-300 bg-yellow-50'
+                          : 'border-green-300 bg-green-50'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                          <p className="font-medium text-xs">
+                            {file.filename}
+                            {file.isDuplicate && <span className="ml-2 text-yellow-700">(Will Update Existing)</span>}
+                            {file.validationErrors && file.validationErrors.length > 0 && (
+                              <span className="ml-2 text-red-700">(Error)</span>
+                            )}
+                          </p>
+                          {file.wellName && (
+                            <p className="text-xs text-muted-foreground mt-1">
+                              Well: {file.wellName} | Curves: {file.curveNames?.length || 0} | 
+                              Depth: {file.startDepth?.toFixed(1)} - {file.stopDepth?.toFixed(1)} | 
+                              Points: {file.dataPoints}
+                            </p>
+                          )}
+                          {file.validationErrors && file.validationErrors.length > 0 && (
+                            <div className="mt-1 text-xs text-red-600">
+                              {file.validationErrors.map((err: string, i: number) => (
+                                <div key={i}>• {err}</div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="text-sm text-muted-foreground">
+              <p className="font-medium">Current Project:</p>
+              <p className="font-mono text-xs mt-1">{projectPath || "No project selected"}</p>
+              {projectPath && projectPath !== "No path selected" && (
+                <p className="font-mono text-xs mt-1">
+                  Wells will be saved to: {projectPath}/10-WELLS/[well-name].ptrc
+                </p>
+              )}
+            </div>
+
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => onOpenChange(false)}
+                disabled={isUploading}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleBatchLasImport}
+                disabled={isUploading || !batchPreview || batchPreview.validFiles === 0}
+              >
+                <Upload className="w-4 h-4 mr-2" />
+                {isUploading ? "Importing..." : `Import ${batchPreview?.validFiles || 0} Files`}
               </Button>
             </DialogFooter>
           </TabsContent>
