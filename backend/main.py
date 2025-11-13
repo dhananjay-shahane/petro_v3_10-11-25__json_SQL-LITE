@@ -2,6 +2,7 @@ import os
 import secrets
 import logging
 import sys
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -10,10 +11,40 @@ from starlette.middleware.sessions import SessionMiddleware
 from pathlib import Path
 
 from routers import workspace, projects, directories, data, wells, sessions, well_sessions, cli, storage_inspector, file_upload, workspace_sync, tops, settings
+from utils.file_well_storage import initialize_file_well_storage
+from dependencies import WORKSPACE_ROOT
 
 
 IS_PRODUCTION = os.environ.get('NODE_ENV') == 'production'
 MAX_UPLOAD_SIZE = 500 * 1024 * 1024  # 500 MB limit for large LAS files
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Lifespan hook for FastAPI application.
+    Handles startup and shutdown events.
+    """
+    # STARTUP: Index well files (.ptrc) at application startup
+    print("=" * 60)
+    print("[STARTUP] Initializing File-Based Well Storage...")
+    print("=" * 60)
+    
+    try:
+        initialize_file_well_storage(WORKSPACE_ROOT)
+        print("[STARTUP] Well file indexing complete. App is ready.")
+    except Exception as e:
+        print(f"[STARTUP] Warning: Failed to index well files: {e}")
+        import traceback
+        traceback.print_exc()
+    
+    print("=" * 60)
+    
+    yield  # App starts serving requests
+    
+    # SHUTDOWN: Cleanup if needed
+    print("[SHUTDOWN] Server shutting down...")
+
 
 def create_app():
     """Create and configure the FastAPI application"""
@@ -22,7 +53,8 @@ def create_app():
         description="API for petrophysics data analysis and visualization",
         version="2.0.0",
         docs_url="/docs" if not IS_PRODUCTION else None,
-        redoc_url="/redoc" if not IS_PRODUCTION else None
+        redoc_url="/redoc" if not IS_PRODUCTION else None,
+        lifespan=lifespan
     )
     
     logging.basicConfig(
