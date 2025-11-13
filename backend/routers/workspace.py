@@ -140,8 +140,8 @@ async def save_layout(request: LayoutSaveRequest):
             request.layout,
             request.visiblePanels,
             layout_name,
-            request.windowLinks,
-            request.fontSizes
+            request.windowLinks or {},
+            request.fontSizes or {}
         )
         
         print(f"  [STORAGE] Layout '{layout_name}' saved to SQLite storage with window links and font sizes")
@@ -200,89 +200,90 @@ async def delete_layout(projectPath: str, layoutName: str = "default"):
         raise HTTPException(status_code=500, detail=f"Failed to delete layout: {str(e)}")
 
 
-@router.get("/windows", response_model=WindowDataResponse)
-async def get_window_data(projectPath: str):
-    """Get window management data for a specific project"""
-    try:
-        validate_path(projectPath)
-        window_data = cache_service.load_window_data(projectPath)
-        return {
-            "success": True,
-            "window_count": window_data.get("count", 0),
-            "active_window_id": window_data.get("active_window_id"),
-            "window_ids": window_data.get("window_ids", []),
-            "window_links": window_data.get("window_links", {}),
-            "message": "Window data loaded successfully"
-        }
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to load window data: {str(e)}")
+# Temporarily disabled: window management methods not yet implemented in SQLiteStorageService
+# @router.get("/windows", response_model=WindowDataResponse)
+# async def get_window_data(projectPath: str):
+#     """Get window management data for a specific project"""
+#     try:
+#         validate_path(projectPath)
+#         window_data = cache_service.load_window_data(projectPath)
+#         return {
+#             "success": True,
+#             "window_count": window_data.get("count", 0),
+#             "active_window_id": window_data.get("active_window_id"),
+#             "window_ids": window_data.get("window_ids", []),
+#             "window_links": window_data.get("window_links", {}),
+#             "message": "Window data loaded successfully"
+#         }
+#     except ValueError as e:
+#         raise HTTPException(status_code=400, detail=str(e))
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=f"Failed to load window data: {str(e)}")
 
 
-@router.post("/windows", response_model=WindowDataResponse)
-async def save_window_data(request: WindowDataRequest):
-    """Save complete window management data for a specific project"""
-    try:
-        validate_path(request.projectPath)
-        cache_service.save_window_data(
-            project_path=request.projectPath,
-            window_count=request.window_count,
-            active_window_id=request.active_window_id,
-            window_ids=request.window_ids,
-            window_links=request.window_links
-        )
-        
-        return {
-            "success": True,
-            "window_count": request.window_count,
-            "active_window_id": request.active_window_id,
-            "window_ids": request.window_ids,
-            "window_links": request.window_links,
-            "message": "Window data saved successfully"
-        }
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to save window data: {str(e)}")
+# @router.post("/windows", response_model=WindowDataResponse)
+# async def save_window_data(request: WindowDataRequest):
+#     """Save complete window management data for a specific project"""
+#     try:
+#         validate_path(request.projectPath)
+#         cache_service.save_window_data(
+#             project_path=request.projectPath,
+#             window_count=request.window_count,
+#             active_window_id=request.active_window_id,
+#             window_ids=request.window_ids,
+#             window_links=request.window_links
+#         )
+#         
+#         return {
+#             "success": True,
+#             "window_count": request.window_count,
+#             "active_window_id": request.active_window_id,
+#             "window_ids": request.window_ids,
+#             "window_links": request.window_links,
+#             "message": "Window data saved successfully"
+#         }
+#     except ValueError as e:
+#         raise HTTPException(status_code=400, detail=str(e))
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=f"Failed to save window data: {str(e)}")
 
 
-@router.post("/windows/add")
-async def add_window(request: WindowActionRequest):
-    """Add a new window for a specific project"""
-    try:
-        validate_path(request.projectPath)
-        cache_service.add_window(request.projectPath, request.window_id)
-        window_data = cache_service.load_window_data(request.projectPath)
-        return {
-            "success": True,
-            "window_id": request.window_id,
-            "window_count": window_data.get("count", 0),
-            "message": f"Window {request.window_id} added successfully"
-        }
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to add window: {str(e)}")
+# @router.post("/windows/add")
+# async def add_window(request: WindowActionRequest):
+#     """Add a new window for a specific project"""
+#     try:
+#         validate_path(request.projectPath)
+#         cache_service.add_window(request.projectPath, request.window_id)
+#         window_data = cache_service.load_window_data(request.projectPath)
+#         return {
+#             "success": True,
+#             "window_id": request.window_id,
+#             "window_count": window_data.get("count", 0),
+#             "message": f"Window {request.window_id} added successfully"
+#         }
+#     except ValueError as e:
+#         raise HTTPException(status_code=400, detail=str(e))
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=f"Failed to add window: {str(e)}")
 
 
-@router.post("/windows/remove")
-async def remove_window(request: WindowActionRequest):
-    """Remove a window from a specific project"""
-    try:
-        validate_path(request.projectPath)
-        cache_service.remove_window(request.projectPath, request.window_id)
-        window_data = cache_service.load_window_data(request.projectPath)
-        return {
-            "success": True,
-            "window_id": request.window_id,
-            "window_count": window_data.get("count", 0),
-            "message": f"Window {request.window_id} removed successfully"
-        }
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to remove window: {str(e)}")
+# @router.post("/windows/remove")
+# async def remove_window(request: WindowActionRequest):
+#     """Remove a window from a specific project"""
+#     try:
+#         validate_path(request.projectPath)
+#         cache_service.remove_window(request.projectPath, request.window_id)
+#         window_data = cache_service.load_window_data(request.projectPath)
+#         return {
+#             "success": True,
+#             "window_id": request.window_id,
+#             "window_count": window_data.get("count", 0),
+#             "message": f"Window {request.window_id} removed successfully"
+#         }
+#     except ValueError as e:
+#         raise HTTPException(status_code=400, detail=str(e))
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=f"Failed to remove window: {str(e)}")
 
 
 @router.post("/windows/set-active")

@@ -231,11 +231,6 @@ export default function DataBrowserPanelNew({
     setCheckedLogs(new Set());
     setCheckedConstants(new Set());
     
-    // Notify parent component about dataset selection
-    if (onDatasetSelect) {
-      onDatasetSelect(dataset);
-    }
-    
     // Log dataset selection to feedback panel
     const wellName = selectedWell?.name || 'Unknown well';
     const message = `Data Browser: Selected dataset "${dataset.name}" (${dataset.type}) for well "${wellName}"`;
@@ -254,17 +249,25 @@ export default function DataBrowserPanelNew({
         newSet.add(logName);
       }
       console.log('[DataBrowser] Checked logs:', Array.from(newSet));
-      
-      // Auto-generate plot when logs are selected
-      const selectedLogNames = Array.from(newSet);
-      if (selectedLogNames.length > 0 && onGeneratePlot) {
-        console.log('[DataBrowser] Auto-generating plot for:', selectedLogNames);
-        onGeneratePlot(selectedLogNames);
-      }
-      
       return newSet;
     });
   };
+
+  // Notify parent when dataset selection changes (moved to useEffect to avoid setState during render warning)
+  useEffect(() => {
+    if (selectedDataset && onDatasetSelect) {
+      onDatasetSelect(selectedDataset);
+    }
+  }, [selectedDataset, onDatasetSelect]);
+
+  // Auto-generate plot when logs are selected (moved to useEffect to avoid setState during render warning)
+  useEffect(() => {
+    const selectedLogNames = Array.from(checkedLogs);
+    if (selectedLogNames.length > 0 && onGeneratePlot) {
+      console.log('[DataBrowser] Auto-generating plot for:', selectedLogNames);
+      onGeneratePlot(selectedLogNames);
+    }
+  }, [checkedLogs, onGeneratePlot]);
 
   const handleConstantCheckboxChange = (constantName: string) => {
     setCheckedConstants((prev) => {

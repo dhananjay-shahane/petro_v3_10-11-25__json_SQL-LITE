@@ -14,6 +14,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { Upload } from "lucide-react";
+import { FileUploadZone, FileUploadItem } from "@/components/ui/file-upload-zone";
 
 interface NewWellDialogProps {
   open: boolean;
@@ -36,6 +37,11 @@ export default function NewWellDialog({
   const [batchPreview, setBatchPreview] = useState<any>(null);
   const [setName, setSetName] = useState<string>("");
   const [datasetType, setDatasetType] = useState<string>("CONTINUOUS");
+  
+  const [lasFileItems, setLasFileItems] = useState<FileUploadItem[]>([]);
+  const [lasFolderItems, setLasFolderItems] = useState<FileUploadItem[]>([]);
+  const [csvFileItems, setCsvFileItems] = useState<FileUploadItem[]>([]);
+  
   const { toast} = useToast();
 
   const handleCsvUpload = async () => {
@@ -319,6 +325,56 @@ export default function NewWellDialog({
     }
   };
 
+  const handleLasFilesAccepted = async (files: File[]) => {
+    if (files.length === 0) return;
+    
+    const file = files[0];
+    setLasFile(file);
+    
+    const fileItem: FileUploadItem = {
+      id: `las-${Date.now()}`,
+      name: file.name,
+      size: file.size,
+      status: 'pending'
+    };
+    setLasFileItems([fileItem]);
+    
+    await handleLasFileChange({ target: { files: [file] } } as any);
+  };
+
+  const handleLasFolderFilesAccepted = async (files: File[]) => {
+    if (files.length === 0) return;
+    
+    const fileItems: FileUploadItem[] = files.map((file, index) => ({
+      id: `las-folder-${Date.now()}-${index}`,
+      name: file.name,
+      size: file.size,
+      status: 'pending'
+    }));
+    setLasFolderItems(fileItems);
+    
+    const fileList = Object.assign(files, {
+      item: (index: number) => files[index]
+    }) as unknown as FileList;
+    
+    await handleBatchLasPreview(fileList);
+  };
+
+  const handleCsvFilesAccepted = (files: File[]) => {
+    if (files.length === 0) return;
+    
+    const file = files[0];
+    setCsvFile(file);
+    
+    const fileItem: FileUploadItem = {
+      id: `csv-${Date.now()}`,
+      name: file.name,
+      size: file.size,
+      status: 'pending'
+    };
+    setCsvFileItems([fileItem]);
+  };
+
   const handleDialogClose = (open: boolean) => {
     if (!open && !isUploading) {
       setCsvFile(null);
@@ -328,6 +384,9 @@ export default function NewWellDialog({
       setBatchPreview(null);
       setSetName("");
       setDatasetType("CONTINUOUS");
+      setLasFileItems([]);
+      setLasFolderItems([]);
+      setCsvFileItems([]);
     }
     onOpenChange(open);
   };
@@ -457,24 +516,18 @@ export default function NewWellDialog({
           </TabsContent>
           
           <TabsContent value="las" className="space-y-4 pt-4">
-            <div className="grid gap-2">
-              <Label htmlFor="las-file">LAS File</Label>
-              <div className="flex items-center gap-2">
-                <Input
-                  id="las-file"
-                  type="file"
-                  accept=".las,.LAS"
-                  onChange={handleLasFileChange}
-                  disabled={isUploading}
-                  className="cursor-pointer"
-                />
-              </div>
-              {lasFile && (
-                <p className="text-sm text-muted-foreground">
-                  Selected: {lasFile.name} ({(lasFile.size / 1024).toFixed(2)} KB)
-                </p>
-              )}
-            </div>
+            <FileUploadZone
+              mode="single-las"
+              accept={{
+                'application/las': ['.las'],
+                'text/plain': ['.las', '.LAS']
+              }}
+              multiple={false}
+              maxSizeMB={500}
+              files={lasFileItems}
+              onFilesAccepted={handleLasFilesAccepted}
+              disabled={isUploading}
+            />
 
             {lasPreview && (
               <div className="bg-muted p-4 rounded-lg text-sm space-y-2">
@@ -528,25 +581,19 @@ export default function NewWellDialog({
           </TabsContent>
           
           <TabsContent value="las-folder" className="space-y-4 pt-4">
-            <div className="grid gap-2">
-              <Label htmlFor="las-files">Select Multiple LAS Files</Label>
-              <div className="flex items-center gap-2">
-                <Input
-                  id="las-files"
-                  type="file"
-                  accept=".las,.LAS"
-                  multiple
-                  onChange={(e) => handleBatchLasPreview(e.target.files)}
-                  disabled={isUploading}
-                  className="cursor-pointer"
-                />
-              </div>
-              {lasFiles.length > 0 && (
-                <p className="text-sm text-muted-foreground">
-                  Selected: {lasFiles.length} file(s)
-                </p>
-              )}
-            </div>
+            <FileUploadZone
+              mode="multi-las"
+              accept={{
+                'application/las': ['.las'],
+                'text/plain': ['.las', '.LAS']
+              }}
+              multiple={true}
+              maxSizeMB={500}
+              files={lasFolderItems}
+              onFilesAccepted={handleLasFolderFilesAccepted}
+              disabled={isUploading}
+              allowFolders={true}
+            />
 
             {batchPreview && batchPreview.files && batchPreview.files.length > 0 && (
               <div className="bg-muted p-4 rounded-lg text-sm space-y-3 max-h-96 overflow-y-auto">
@@ -626,24 +673,18 @@ export default function NewWellDialog({
           </TabsContent>
           
           <TabsContent value="csv" className="space-y-4 pt-4">
-            <div className="grid gap-2">
-              <Label htmlFor="csv-file">CSV File</Label>
-              <div className="flex items-center gap-2">
-                <Input
-                  id="csv-file"
-                  type="file"
-                  accept=".csv"
-                  onChange={handleCsvFileChange}
-                  disabled={isUploading}
-                  className="cursor-pointer"
-                />
-              </div>
-              {csvFile && (
-                <p className="text-sm text-muted-foreground">
-                  Selected: {csvFile.name} ({(csvFile.size / 1024).toFixed(2)} KB)
-                </p>
-              )}
-            </div>
+            <FileUploadZone
+              mode="csv"
+              accept={{
+                'text/csv': ['.csv'],
+                'application/vnd.ms-excel': ['.csv']
+              }}
+              multiple={false}
+              maxSizeMB={50}
+              files={csvFileItems}
+              onFilesAccepted={handleCsvFilesAccepted}
+              disabled={isUploading}
+            />
 
             <div className="text-sm text-muted-foreground">
               <p className="font-medium">Current Project:</p>

@@ -23,6 +23,7 @@ interface FileUploadZoneProps {
   onFilesRejected?: (files: File[]) => void;
   disabled?: boolean;
   className?: string;
+  allowFolders?: boolean;
 }
 
 export function FileUploadZone({
@@ -37,7 +38,8 @@ export function FileUploadZone({
   onFilesAccepted,
   onFilesRejected,
   disabled = false,
-  className
+  className,
+  allowFolders = false
 }: FileUploadZoneProps) {
   const maxSize = maxSizeMB * 1024 * 1024;
 
@@ -46,6 +48,7 @@ export function FileUploadZone({
     multiple,
     maxSize,
     disabled,
+    useFsAccessApi: false,
     onDrop: (acceptedFiles, rejectedFiles) => {
       if (acceptedFiles.length > 0) {
         onFilesAccepted(acceptedFiles);
@@ -87,7 +90,10 @@ export function FileUploadZone({
           disabled && "opacity-50 cursor-not-allowed"
         )}
       >
-        <input {...getInputProps()} />
+        <input {...getInputProps(allowFolders ? {
+          webkitdirectory: "true",
+          directory: ""
+        } as any : {})} />
         
         <div className="flex flex-col items-center justify-center text-center space-y-4">
           <div className="relative">
