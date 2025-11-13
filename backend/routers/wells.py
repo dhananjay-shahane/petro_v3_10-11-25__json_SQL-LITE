@@ -4,7 +4,6 @@ import traceback
 import shutil
 import lasio
 import hashlib
-import sqlite3
 from pathlib import Path
 from datetime import datetime
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
@@ -24,9 +23,11 @@ from utils.LogPlot import LogPlotManager
 from utils.CPI import CrossPlotManager
 from utils.cpi_plotly import CPIPlotlyManager
 from utils.matplotlib_cpi_plot import MatplotlibCPIPlotter
+from utils.file_well_storage import get_file_well_storage
 from utils.sqlite_storage import SQLiteStorageService
 
-cache_service = SQLiteStorageService()
+# Keep SQLite for non-well data (sessions, projects, etc.)
+session_storage = SQLiteStorageService()
 
 
 router = APIRouter(prefix="/wells", tags=["wells"])
@@ -40,13 +41,14 @@ def get_project_session_id(project_path: str) -> str:
 
 
 def store_well_in_session(well_path: str, well_data: dict):
-    """Store well data in JSON storage session automatically"""
+    """Store well data in session metadata (not in SQLite - wells use file storage)"""
     try:
         project_path = os.path.dirname(os.path.dirname(well_path))
         session_id = get_project_session_id(project_path)
         well_name = os.path.basename(well_path).replace('.ptrc', '')
         
-        existing_session = cache_service.load_session(session_id)
+        # Use session_storage for session metadata (not well data)
+        existing_session = session_storage.load_session(session_id)
         
         if existing_session:
             wells = existing_session.get("wells", {})
@@ -61,8 +63,8 @@ def store_well_in_session(well_path: str, well_data: dict):
         
         wells[well_name] = well_data
         
-        cache_service.store_session(session_id, wells, metadata)
-        print(f"[Storage] Stored well '{well_name}' in session {session_id}")
+        session_storage.store_session(session_id, wells, metadata)
+        print(f"[Storage] Stored well metadata in session {session_id}")
         
         return session_id
     except Exception as e:
@@ -72,42 +74,35 @@ def store_well_in_session(well_path: str, well_data: dict):
 
 def fetch_well_data(project_path: str, well_id: str):
     """
-    Fetch well data from SQLite first, falling back to disk if not cached.
+    Fetch well data using file-based storage with LRU cache.
     Returns tuple of (Well object, well_data dict)
     
     This helper ensures all endpoints use consistent data retrieval logic.
     """
-    # Try to load from SQLite first
-    well_data_from_sqlite = None
-    try:
-        well_data_from_sqlite = cache_service.get_well(project_path, well_id)
-        if well_data_from_sqlite:
-            print(f"[WellFetch] Loaded well '{well_id}' from SQLite database")
-            # Reconstruct Well object from cached data
-            well = Well.from_dict(well_data_from_sqlite)
-            return well, well_data_from_sqlite
-    except Exception as e:
-        print(f"[WellFetch] Failed to load from SQLite: {e}")
+    # Get the file-based storage service
+    storage = get_file_well_storage()
     
-    # Fallback to disk
+    # Try to load from file storage (with LRU cache)
+    well_data = storage.load_well_data(project_path, well_id)
+    
+    if well_data:
+        print(f"[WellFetch] Loaded well '{well_id}' from file storage (cached or disk)")
+        # Reconstruct Well object from data
+        well = Well.from_dict(well_data)
+        return well, well_data
+    
+    # If not found, check if file exists on disk (fallback)
     wells_folder = os.path.join(project_path, "10-WELLS")
     well_file = os.path.join(wells_folder, f"{well_id}.ptrc")
     
     if not os.path.exists(well_file):
         raise HTTPException(status_code=404, detail=f"Well {well_id} not found")
     
-    print(f"[WellFetch] Loading well '{well_id}' from disk: {well_file}")
+    print(f"[WellFetch] Loading well '{well_id}' from disk (direct): {well_file}")
     well = Well.deserialize(filepath=well_file)
     well_data = well.to_dict()
     
-    # Save to SQLite for future use
-    try:
-        cache_service.save_well(well_data, project_path)
-        print(f"[WellFetch] Saved well '{well_id}' to SQLite for future use")
-    except Exception as e:
-        print(f"[WellFetch] Warning: Failed to save to SQLite: {e}")
-    
-    # Also store in session
+    # Store in session metadata
     store_well_in_session(well_file, well_data)
     
     return well, well_data
@@ -369,32 +364,23 @@ async def create_from_las(
             well_data = well.to_dict()
             store_well_in_session(well_file_path, well_data)
             
-            # Save to permanent SQLite storage
+            # Save to file-based storage (updates cache and index)
             try:
-                cache_service.save_well(well_data, resolved_project_path)
-                logs.append({"message": "Well saved to SQLite database", "type": "success"})
+                storage = get_file_well_storage()
+                storage.save_well_data(well_data, resolved_project_path)
+                logs.append({"message": "Well saved to file storage", "type": "success"})
                 
-                # Update project timestamp to mark project as modified when LAS is uploaded
+                # Update project timestamp in SQLite (non-well data)
                 try:
-                    db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'petrophysics.db')
-                    conn = sqlite3.connect(db_path)
-                    cursor = conn.cursor()
                     session_id = get_project_session_id(resolved_project_path)
                     now = datetime.utcnow().isoformat()
-                    cursor.execute("""
-                        INSERT OR IGNORE INTO projects (session_id, project_path, updated_at)
-                        VALUES (?, ?, ?)
-                    """, (session_id, resolved_project_path, now))
-                    cursor.execute("""
-                        UPDATE projects SET updated_at = ? WHERE session_id = ?
-                    """, (now, session_id))
-                    conn.commit()
-                    conn.close()
+                    # Use session_storage for project metadata (not well data)
+                    session_storage.update_project_timestamp(session_id, resolved_project_path, now)
                     logs.append({"message": "Project marked as modified", "type": "success"})
                 except Exception as timestamp_error:
                     logs.append({"message": f"Warning: Failed to update project timestamp: {str(timestamp_error)}", "type": "warning"})
             except Exception as e:
-                logs.append({"message": f"Warning: Failed to save to SQLite: {str(e)}", "type": "warning"})
+                logs.append({"message": f"Warning: Failed to save well: {str(e)}", "type": "warning"})
             
             logs.append({"message": f"SUCCESS: Well saved to: {well_file_path}", "type": "success"})
             
@@ -526,34 +512,21 @@ async def get_well_data(wellPath: str):
         well_name = os.path.basename(resolved_path).replace('.ptrc', '')
         project_path = os.path.dirname(os.path.dirname(resolved_path))
         
-        # Try to load from SQLite first
-        well_data_from_sqlite = None
-        try:
-            well_data_from_sqlite = cache_service.get_well(project_path, well_name)
-            if well_data_from_sqlite:
-                print(f"[DataAPI] Loaded well '{well_name}' from SQLite database")
-        except Exception as e:
-            print(f"[DataAPI] Failed to load from SQLite, will try disk: {e}")
+        # Load from file storage (with LRU cache)
+        storage = get_file_well_storage()
+        well_data = storage.load_well_data(project_path, well_name)
         
-        # Fallback to disk if SQLite doesn't have it
-        if not well_data_from_sqlite:
+        if well_data:
+            print(f"[DataAPI] Loaded well '{well_name}' from file storage (cached or disk)")
+            well = Well.from_dict(well_data)
+        else:
+            # Fallback if not in index
             if not os.path.exists(resolved_path):
                 raise HTTPException(status_code=404, detail="Well file not found")
             
-            print(f"[DataAPI] Loading complete well data for '{well_name}' from disk")
+            print(f"[DataAPI] Loading complete well data for '{well_name}' from disk (direct)")
             well = Well.deserialize(filepath=resolved_path)
             well_data = well.to_dict()
-            
-            # Save to SQLite for future use
-            try:
-                cache_service.save_well(well_data, project_path)
-                print(f"[DataAPI] Saved well '{well_name}' to SQLite for future use")
-            except Exception as e:
-                print(f"[DataAPI] Warning: Failed to save to SQLite: {e}")
-        else:
-            # Reconstruct Well object from SQLite data
-            well = Well.from_dict(well_data_from_sqlite)
-            well_data = well_data_from_sqlite
         
         store_well_in_session(resolved_path, well_data)
         
@@ -696,27 +669,30 @@ async def list_wells(projectPath: str):
             print(f"[Wells API] Project path does not exist: {resolved_path}")
             return {"wells": []}
         
-        # Try to get wells from SQLite first
-        try:
-            sqlite_wells = cache_service.get_project_wells(resolved_path)
-            if sqlite_wells:
-                print(f"[Wells API] Found {len(sqlite_wells)} wells in SQLite database")
-                wells = []
-                for well_summary in sqlite_wells:
-                    wells.append({
-                        "id": well_summary['well_name'],
-                        "name": well_summary['well_name'],
-                        "type": well_summary.get('well_type', 'Dev'),
-                        "path": os.path.join(resolved_path, "10-WELLS", f"{well_summary['well_name']}.ptrc"),
-                        "created_at": well_summary.get('date_created'),
-                        "datasets": well_summary.get('total_datasets', 0)
-                    })
-                wells.sort(key=lambda x: x['name'])
-                return {"wells": wells}
-        except Exception as e:
-            print(f"[Wells API] Error reading from SQLite, falling back to .ptrc files: {e}")
+        # Get wells from file storage index
+        storage = get_file_well_storage()
+        well_ids = storage.list_wells_in_project(resolved_path)
         
-        # Fallback: read from .ptrc files
+        if well_ids:
+            print(f"[Wells API] Found {len(well_ids)} wells in file index")
+            wells = []
+            for well_id in well_ids:
+                # Try to load minimal well data from cache/disk
+                well_data = storage.load_well_data(resolved_path, well_id)
+                if well_data:
+                    wells.append({
+                        "id": well_id,
+                        "name": well_data.get('name', well_id),
+                        "type": well_data.get('well_type', 'Dev'),
+                        "path": os.path.join(resolved_path, "10-WELLS", f"{well_id}.ptrc"),
+                        "created_at": well_data.get('date_created'),
+                        "datasets": len(well_data.get('datasets', []))
+                    })
+            wells.sort(key=lambda x: x['name'])
+            if wells:
+                return {"wells": wells}
+        
+        # Fallback: read from .ptrc files directly
         wells_folder = os.path.join(resolved_path, "10-WELLS")
         
         # If wells folder doesn't exist, return empty list (not an error)
