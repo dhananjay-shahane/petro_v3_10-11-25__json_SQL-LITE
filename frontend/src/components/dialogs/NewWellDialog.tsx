@@ -407,7 +407,7 @@ export default function NewWellDialog({
     <Dialog open={open} onOpenChange={handleDialogClose}>
       <DialogContent className="sm:max-w-[600px]">
         <DialogHeader>
-          <DialogTitle>Load Well</DialogTitle>
+          <DialogTitle>Create New Well</DialogTitle>
           <DialogDescription>
             Upload a LAS file or CSV file with well data to create wells in your project.
           </DialogDescription>
@@ -422,54 +422,30 @@ export default function NewWellDialog({
           </TabsList>
           
           <TabsContent value="help" className="space-y-4 pt-4">
-            <div className="bg-muted p-6 rounded-lg space-y-4">
-              <h3 className="font-bold text-lg">Load Well - Help & Information</h3>
+            <div className="bg-muted p-4 rounded-lg space-y-3">
+              <h3 className="font-bold">Help & Information</h3>
               
-              <div className="space-y-3">
+              <div className="space-y-2 text-sm">
                 <div>
-                  <p className="font-semibold text-sm mb-2">📁 Load LAS (Single File)</p>
-                  <p className="text-sm text-muted-foreground">
-                    Upload a single LAS file to create a new well or add a dataset to an existing well. 
-                    The well name is automatically extracted from the LAS file header.
-                  </p>
+                  <p className="font-semibold">📁 Load LAS</p>
+                  <p className="text-muted-foreground">Upload single LAS file</p>
                 </div>
 
                 <div>
-                  <p className="font-semibold text-sm mb-2">📂 Load LAS Folder (Multiple Files)</p>
-                  <p className="text-sm text-muted-foreground">
-                    Select multiple LAS files at once. Each file will be processed individually:
-                  </p>
-                  <ul className="list-disc list-inside text-sm text-muted-foreground ml-4 mt-1 space-y-1">
-                    <li>If well exists: Dataset is added to existing well</li>
-                    <li>If well doesn't exist: New well is created</li>
-                    <li>Preview shows which wells will be created/updated</li>
+                  <p className="font-semibold">📂 Load LAS Folder</p>
+                  <p className="text-muted-foreground">Upload multiple LAS files at once</p>
+                </div>
+
+                <div>
+                  <p className="font-semibold">📄 Upload CSV</p>
+                  <p className="text-muted-foreground mb-1">Create wells from CSV file</p>
+                  <p className="text-xs text-muted-foreground font-semibold mt-2">Required columns:</p>
+                  <ul className="list-disc list-inside text-xs text-muted-foreground ml-2 space-y-0.5">
+                    <li><code>well_name</code> (required)</li>
+                    <li><code>description</code> (optional)</li>
+                    <li><code>las_file</code> (optional)</li>
+                    <li><code>depth_min</code>, <code>depth_max</code>, <code>location</code> (optional)</li>
                   </ul>
-                </div>
-
-                <div>
-                  <p className="font-semibold text-sm mb-2">📄 Upload CSV (Batch Well Creation)</p>
-                  <p className="text-sm text-muted-foreground">
-                    Upload a CSV file with well information to create multiple wells at once.
-                  </p>
-                </div>
-
-                <div className="pt-3 border-t border-border">
-                  <p className="font-semibold text-sm mb-2">📊 LAS File Requirements</p>
-                  <ul className="list-disc list-inside text-sm text-muted-foreground space-y-1">
-                    <li>File must have .las or .LAS extension</li>
-                    <li>Must contain WELL name in header section</li>
-                    <li>Maximum file size: 500 MB (recommended: up to 50 MB)</li>
-                    <li>Well data saved as JSON in 10-WELLS folder with .ptrc extension</li>
-                    <li>Original LAS files copied to 02-INPUT_LAS_FOLDER</li>
-                  </ul>
-                </div>
-
-                <div className="pt-3 border-t border-border">
-                  <p className="font-semibold text-sm mb-2">💾 Storage Information</p>
-                  <p className="text-sm text-muted-foreground">
-                    Wells are stored as individual JSON files with .ptrc extension in the project's 10-WELLS folder. 
-                    This allows for efficient loading and in-memory caching using LRU (Least Recently Used) algorithm.
-                  </p>
                 </div>
               </div>
             </div>
@@ -667,19 +643,6 @@ export default function NewWellDialog({
                   Selected: {csvFile.name} ({(csvFile.size / 1024).toFixed(2)} KB)
                 </p>
               )}
-            </div>
-
-            <div className="bg-muted p-4 rounded-lg text-sm">
-              <p className="font-medium mb-2">CSV Format:</p>
-              <p className="text-muted-foreground mb-2">The CSV file should contain the following columns:</p>
-              <ul className="list-disc list-inside text-muted-foreground space-y-1">
-                <li><code>well_name</code> - Name of the well (required)</li>
-                <li><code>description</code> - Well description (optional)</li>
-                <li><code>las_file</code> - LAS filename in 02-INPUT_LAS_FOLDER (optional)</li>
-                <li><code>depth_min</code> - Minimum depth (optional)</li>
-                <li><code>depth_max</code> - Maximum depth (optional)</li>
-                <li><code>location</code> - Well location (optional)</li>
-              </ul>
             </div>
 
             <div className="text-sm text-muted-foreground">
