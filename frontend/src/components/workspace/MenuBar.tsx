@@ -481,7 +481,7 @@ export default function MenuBar({
             <DropdownMenuItem onClick={handleOpen} data-testid="menu-open">Open</DropdownMenuItem>
             <DropdownMenuItem onClick={handleSave} data-testid="menu-save">Save</DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={onNewWell} data-testid="menu-new-well">New Well</DropdownMenuItem>
+            <DropdownMenuItem onClick={onNewWell} data-testid="menu-new-well">Load Well</DropdownMenuItem>
             <DropdownMenuItem onClick={() => setDataExplorerOpen(true)} data-testid="menu-reveal-data">Reveal Data</DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => onTogglePanel("dataBrowser")} data-testid="menu-new-dockable">New Dockable Window</DropdownMenuItem>

@@ -407,7 +407,7 @@ export default function NewWellDialog({
     <Dialog open={open} onOpenChange={handleDialogClose}>
       <DialogContent className="sm:max-w-[600px]">
         <DialogHeader>
-          <DialogTitle>Create New Well</DialogTitle>
+          <DialogTitle>Load Well</DialogTitle>
           <DialogDescription>
             Upload a LAS file or CSV file with well data to create wells in your project.
           </DialogDescription>
