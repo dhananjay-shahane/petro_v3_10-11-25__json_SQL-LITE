@@ -270,27 +270,119 @@ def create_well_from_las(
         
         # Check if well already exists
         well_created = False
+        dataset_merged = False
+        skipped_duplicate = False
+        new_curves_added = []
+        duplicate_curves = []
+        
         if os.path.exists(well_file_path):
             # Load existing well
             well = Well.deserialize(filepath=well_file_path)
             
-            # Check for duplicate dataset and handle versioning
-            existing_dataset_names = [dtst.name for dtst in well.datasets]
-            original_dataset_name = dataset_name
-            if dataset_name in existing_dataset_names:
-                if enable_versioning:
-                    # Auto-increment version: MAIN, MAIN_1, MAIN_2, etc.
-                    version = 1
-                    while f"{original_dataset_name}_{version}" in existing_dataset_names:
-                        version += 1
-                    dataset_name = f"{original_dataset_name}_{version}"
-                    dataset.name = dataset_name
-                    print(f"✓ Dataset versioned: {original_dataset_name} → {dataset_name}")
-                else:
-                    return False, f"❌ Dataset '{dataset_name}' already exists in well '{well_name}'", None
+            # Get curve names from the new dataset
+            new_curve_names = set(log.name for log in dataset.well_logs)
+            print(f"[LAS Import] New dataset contains {len(new_curve_names)} curves: {list(new_curve_names)}")
             
-            # Append new dataset
-            well.datasets.append(dataset)
+            # Find the BEST matching dataset by checking curves (highest overlap ratio)
+            matching_dataset = None
+            best_overlap_ratio = 0
+            best_common_curves = []
+            best_unique_curves = []
+            
+            for existing_dataset in well.datasets:
+                # Skip system datasets (REFERENCE, WELL_HEADER)
+                if existing_dataset.type in ['REFERENCE', 'WELL_HEADER']:
+                    continue
+                
+                existing_curve_names = set(log.name for log in existing_dataset.well_logs)
+                
+                # Calculate curve overlap
+                common_curves = new_curve_names.intersection(existing_curve_names)
+                unique_new_curves = new_curve_names - existing_curve_names
+                
+                # Calculate overlap ratio (what percentage of new curves already exist in this dataset)
+                if len(new_curve_names) > 0:
+                    overlap_ratio = len(common_curves) / len(new_curve_names)
+                else:
+                    overlap_ratio = 0
+                
+                # If there's overlap and it's better than previous best, update best match
+                # Require at least 50% overlap to consider it a match
+                if overlap_ratio >= 0.5 and overlap_ratio > best_overlap_ratio:
+                    best_overlap_ratio = overlap_ratio
+                    matching_dataset = existing_dataset
+                    best_common_curves = list(common_curves)
+                    best_unique_curves = list(unique_new_curves)
+                    print(f"[LAS Import] Found better match: dataset '{existing_dataset.name}' with {len(common_curves)} common curves ({overlap_ratio*100:.1f}% overlap)")
+            
+            # Use the best match found
+            if matching_dataset:
+                duplicate_curves = best_common_curves
+                new_curves_added = best_unique_curves
+                print(f"[LAS Import] Best matching dataset: '{matching_dataset.name}' with {best_overlap_ratio*100:.1f}% overlap")
+            
+            if matching_dataset:
+                # Case 1: All curves already exist - complete duplicate
+                if len(new_curves_added) == 0:
+                    skipped_duplicate = True
+                    status_msg = f"ℹ️ Dataset already available: All {len(duplicate_curves)} curves from '{os.path.basename(las_file_path)}' already exist in dataset '{matching_dataset.name}' of well '{well_name}'"
+                    print(f"[LAS Import] Skipping duplicate - all curves already exist")
+                    print(f"[LAS Import] Duplicate curves: {duplicate_curves}")
+                    return True, status_msg, {
+                        'well_name': well_name,
+                        'dataset_name': matching_dataset.name,
+                        'well_file_path': well_file_path,
+                        'las_file_path': las_file_path,
+                        'las_destination': None,
+                        'well_created': False,
+                        'dataset_merged': False,
+                        'skipped_duplicate': True,
+                        'duplicate_curves': duplicate_curves,
+                        'new_curves_added': [],
+                        'curves_count': len(dataset.well_logs)
+                    }
+                
+                # Case 2: Some curves are new - merge them
+                else:
+                    dataset_merged = True
+                    print(f"[LAS Import] Merging {len(new_curves_added)} new curves into existing dataset '{matching_dataset.name}'")
+                    print(f"[LAS Import] New curves: {new_curves_added}")
+                    print(f"[LAS Import] Skipping duplicate curves: {duplicate_curves}")
+                    
+                    # Add only the new curves to the existing dataset
+                    for log in dataset.well_logs:
+                        if log.name in new_curves_added:
+                            matching_dataset.well_logs.append(log)
+                            print(f"[LAS Import] Added new curve '{log.name}' to dataset '{matching_dataset.name}'")
+                    
+                    # Update the dataset's metadata to track the merge
+                    if 'merge_history' not in matching_dataset.metadata:
+                        matching_dataset.metadata['merge_history'] = []
+                    matching_dataset.metadata['merge_history'].append({
+                        'date': datetime.now().isoformat(),
+                        'source_file': os.path.basename(las_file_path),
+                        'curves_added': new_curves_added,
+                        'curves_skipped': duplicate_curves
+                    })
+            else:
+                # Case 3: No matching dataset found - check for name collision and handle versioning
+                existing_dataset_names = [dtst.name for dtst in well.datasets]
+                original_dataset_name = dataset_name
+                if dataset_name in existing_dataset_names:
+                    if enable_versioning:
+                        # Auto-increment version: MAIN, MAIN_1, MAIN_2, etc.
+                        version = 1
+                        while f"{original_dataset_name}_{version}" in existing_dataset_names:
+                            version += 1
+                        dataset_name = f"{original_dataset_name}_{version}"
+                        dataset.name = dataset_name
+                        print(f"✓ Dataset versioned: {original_dataset_name} → {dataset_name}")
+                    else:
+                        return False, f"❌ Dataset '{dataset_name}' already exists in well '{well_name}'", None
+                
+                # Append new dataset
+                well.datasets.append(dataset)
+                print(f"[LAS Import] Added new dataset '{dataset_name}' to well '{well_name}'")
         else:
             # Create new well with REFERENCE and WELL_HEADER datasets
             well = Well(
@@ -338,9 +430,13 @@ def create_well_from_las(
                 shutil.copy2(las_file_path, las_destination)
         
         # Build success message
-        status_msg = f"✓ Imported dataset '{dataset_name}' from '{os.path.basename(las_file_path)}' into well '{well_name}'"
-        if well_created:
-            status_msg += " (new well created)"
+        if dataset_merged:
+            status_msg = f"✓ Merged {len(new_curves_added)} new curves from '{os.path.basename(las_file_path)}' into dataset '{dataset_name}' of well '{well_name}'"
+            status_msg += f" (skipped {len(duplicate_curves)} duplicate curves)"
+        else:
+            status_msg = f"✓ Imported dataset '{dataset_name}' from '{os.path.basename(las_file_path)}' into well '{well_name}'"
+            if well_created:
+                status_msg += " (new well created)"
         
         # Store well in storage session
         try:
@@ -377,6 +473,10 @@ def create_well_from_las(
             'las_file_path': las_file_path,
             'las_destination': las_destination,
             'well_created': well_created,
+            'dataset_merged': dataset_merged,
+            'skipped_duplicate': skipped_duplicate,
+            'new_curves_added': new_curves_added,
+            'duplicate_curves': duplicate_curves,
             'curves_count': len(dataset.well_logs)
         }
         
