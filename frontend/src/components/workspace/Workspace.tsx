@@ -537,9 +537,13 @@ export default function Workspace() {
             );
           }
 
-          setWells(wellsToDisplay);
+          // Deduplicate wells by path to prevent React key warnings
+          const uniqueWells = Array.from(
+            new Map(wellsToDisplay.map((w: any) => [w.path, w])).values()
+          );
+          setWells(uniqueWells);
           (window as any).addAppLog?.(
-            `📊 Found ${wellsToDisplay.length} well(s) in project: ${wellsToDisplay.map((w: any) => w.name).join(", ")}`,
+            `📊 Found ${uniqueWells.length} well(s) in project: ${uniqueWells.map((w: any) => w.name).join(", ")}`,
             "success",
             "database",
           );
@@ -1186,7 +1190,12 @@ export default function Workspace() {
       }
 
       if (newWells.length > 0) {
-        setWells((prev) => [...prev, ...newWells]);
+        // Deduplicate by path before merging
+        setWells((prev) => {
+          const existingPaths = new Set(prev.map(w => w.path));
+          const uniqueNewWells = newWells.filter(w => !existingPaths.has(w.path));
+          return [...prev, ...uniqueNewWells];
+        });
 
         if (!projectName) {
           const firstFileName = newWells[0].name;
@@ -1207,12 +1216,8 @@ export default function Workspace() {
     setNewWellDialogOpen(true);
   };
 
-  const handleWellCreated = (well: {
-    id: string;
-    name: string;
-    path: string;
-  }) => {
-    setWells((prev) => [...prev, well]);
+  const handleWellCreated = async () => {
+    await refreshWellsList();
   };
 
   const handleWellSelect = async (well: WellData) => {
@@ -1323,9 +1328,13 @@ export default function Workspace() {
           );
         }
 
-        setWells(wellsToDisplay);
+        // Deduplicate wells by path to prevent React key warnings
+        const uniqueWells = Array.from(
+          new Map(wellsToDisplay.map((w: any) => [w.path, w])).values()
+        );
+        setWells(uniqueWells);
         console.log(
-          `[Workspace] Refreshed well list: ${wellsToDisplay.length} wells`,
+          `[Workspace] Refreshed well list: ${uniqueWells.length} wells (${wellsToDisplay.length} before dedup)`,
         );
 
         // Check if there's an active well to auto-select and update active well indicator

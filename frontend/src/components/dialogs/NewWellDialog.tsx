@@ -20,7 +20,7 @@ interface NewWellDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   projectPath: string;
-  onWellCreated?: (well: { id: string; name: string; path: string }) => void;
+  onWellCreated?: () => void;
 }
 
 export default function NewWellDialog({ 
@@ -87,15 +87,9 @@ export default function NewWellDialog({
         description: `Successfully created ${result.wellsCreated} well(s) from CSV`,
       });
 
-      // Notify parent about the first well created (for backward compatibility)
+      // Refresh the wells list from backend
       if (result.wells && result.wells.length > 0 && onWellCreated) {
-        result.wells.forEach((well: any) => {
-          onWellCreated({
-            id: well.id,
-            name: well.name,
-            path: well.path,
-          });
-        });
+        onWellCreated();
       }
 
       setCsvFile(null);
@@ -170,11 +164,7 @@ export default function NewWellDialog({
       });
 
       if (onWellCreated) {
-        onWellCreated({
-          id: result.well.id,
-          name: result.well.name,
-          path: result.filePath,
-        });
+        onWellCreated();
       }
 
       setLasFile(null);
@@ -299,15 +289,7 @@ export default function NewWellDialog({
       });
 
       if (result.results && result.results.length > 0 && onWellCreated) {
-        result.results.forEach((res: any) => {
-          if (res.status !== "failed" && res.wellName) {
-            onWellCreated({
-              id: res.wellName,
-              name: res.wellName,
-              path: `${projectPath}/10-WELLS/${res.wellName}.ptrc`,
-            });
-          }
-        });
+        onWellCreated();
       }
 
       setLasFiles([]);

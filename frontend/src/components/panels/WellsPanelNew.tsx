@@ -47,7 +47,7 @@ export default function WellsPanelNew({
           <div className="space-y-1">
             {filteredWells.map((well) => (
               <div
-                key={well.id}
+                key={well.path || well.id}
                 onClick={() => onWellSelect?.(well)}
                 className={`flex items-center gap-2 p-2 hover:bg-accent rounded cursor-pointer transition-colors ${
                   selectedWell?.id === well.id ? 'bg-primary/20 border border-primary' : ''

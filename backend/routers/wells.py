@@ -195,7 +195,7 @@ async def preview_las(data: LASPreviewRequest):
                         break
             
             if not well_name:
-                well_name = Path(filename).stem if filename != 'UNKNOWN' else 'UNKNOWN'
+                well_name = Path(filename).stem if filename and filename != 'UNKNOWN' else 'UNKNOWN'
             
             uwi = ""
             try:
@@ -423,15 +423,8 @@ async def create_from_las(
                 storage.save_well_data(well_data, resolved_project_path)
                 logs.append({"message": "Well saved to file storage", "type": "success"})
                 
-                # Update project timestamp in SQLite (non-well data)
-                try:
-                    session_id = get_project_session_id(resolved_project_path)
-                    now = datetime.utcnow().isoformat()
-                    # Use session_storage for project metadata (not well data)
-                    session_storage.update_project_timestamp(session_id, resolved_project_path, now)
-                    logs.append({"message": "Project marked as modified", "type": "success"})
-                except Exception as timestamp_error:
-                    logs.append({"message": f"Warning: Failed to update project timestamp: {str(timestamp_error)}", "type": "warning"})
+                # Project timestamp is managed by file storage
+                logs.append({"message": "Project marked as modified", "type": "success"})
             except Exception as e:
                 logs.append({"message": f"Warning: Failed to save well: {str(e)}", "type": "warning"})
             
@@ -707,6 +700,7 @@ async def import_las_batch(request: LASBatchImportRequest):
                 well_name = result.get('well_name')
                 was_created = result.get('well_created', False)
                 dataset_name = result.get('dataset_name', '')
+                well_file_path = result.get('well_file_path')
                 
                 if was_created:
                     wells_created.add(well_name)
@@ -714,6 +708,25 @@ async def import_las_batch(request: LASBatchImportRequest):
                     wells_updated.add(well_name)
                 
                 datasets_added += 1
+                
+                # Update file storage cache
+                try:
+                    if well_file_path and os.path.exists(well_file_path):
+                        storage = get_file_well_storage()
+                        
+                        # CRITICAL: Invalidate cache entry before updating to prevent duplicates
+                        project_name = os.path.basename(resolved_project_path)
+                        file_key = f"{project_name}::{well_name}"
+                        if storage.cache.pop(file_key, None) is not None:
+                            print(f"[BatchImport] Invalidated cache entry for: {file_key}")
+                        
+                        # Load fresh data and save to file-based storage (updates cache and index)
+                        well = Well.deserialize(filepath=well_file_path)
+                        well_data = well.to_dict()
+                        storage.save_well_data(well_data, resolved_project_path)
+                        print(f"[BatchImport] Updated file storage cache for well: {well_name}")
+                except Exception as storage_err:
+                    print(f"[BatchImport] Warning: Failed to update file storage for {well_name}: {storage_err}")
                 
                 results.append(LASBatchImportFileResult(
                     filename=filename,
