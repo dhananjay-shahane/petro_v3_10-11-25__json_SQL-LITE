@@ -122,8 +122,18 @@ export default function DataBrowserPanelNew({
     // Use datasets from Workspace if already loaded (avoids duplicate API call)
     // Check for timestamp to confirm data was actually fetched (handles empty dataset arrays correctly)
     const hasLoadedData = (selectedWell as any)?._dataLoadTimestamp || (selectedWell as any)?._refreshTimestamp;
-    if (hasLoadedData && Array.isArray((selectedWell as any).datasets)) {
-      console.log("[DataBrowser] Using datasets from Workspace (already loaded in memory)");
+    const hasDatasets = Array.isArray((selectedWell as any).datasets);
+    
+    console.log("[DataBrowser] Debug:", {
+      wellName: selectedWell?.name,
+      hasLoadedData,
+      hasDatasets,
+      datasetCount: hasDatasets ? (selectedWell as any).datasets.length : 0,
+      timestamp: hasLoadedData
+    });
+    
+    if (hasLoadedData && hasDatasets) {
+      console.log("[DataBrowser] ✅ Using datasets from Workspace (already loaded in memory)");
       const wellDatasets = (selectedWell as any).datasets as Dataset[];
       setDatasets(wellDatasets);
       
@@ -136,6 +146,8 @@ export default function DataBrowserPanelNew({
       
       return; // Skip API fetch - data already available from Workspace
     }
+    
+    console.log("[DataBrowser] ⚠️ Datasets not available from Workspace, fetching from API...");
     
     const loadWellData = async () => {
       if (!selectedWell?.path) {

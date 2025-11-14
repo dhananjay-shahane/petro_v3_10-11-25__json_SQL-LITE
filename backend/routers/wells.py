@@ -1057,7 +1057,7 @@ async def list_wells(projectPath: str):
             print(f"[Wells API] Found {len(well_ids)} wells in file index")
             wells = []
             for well_id in well_ids:
-                # Try to load minimal well data from cache/disk
+                # Load minimal well data from cache (already in memory - no I/O)
                 well_data = storage.load_well_data(resolved_path, well_id)
                 if well_data:
                     wells.append({
@@ -1066,7 +1066,7 @@ async def list_wells(projectPath: str):
                         "type": well_data.get('well_type', 'Dev'),
                         "path": os.path.join(resolved_path, "10-WELLS", f"{well_id}.ptrc"),
                         "created_at": well_data.get('date_created'),
-                        "datasets": len(well_data.get('datasets', []))
+                        "datasets": len(well_data.get('datasets', []))  # Keep just the count
                     })
             wells.sort(key=lambda x: x['name'])
             if wells:

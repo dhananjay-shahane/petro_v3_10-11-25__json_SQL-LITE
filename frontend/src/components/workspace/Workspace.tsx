@@ -1228,8 +1228,6 @@ export default function Workspace() {
       "success",
     );
 
-    setSelectedWell(well);
-
     const channel = new BroadcastChannel("well-selection-channel");
     channel.postMessage({
       type: "WELL_SELECTED",
@@ -1242,6 +1240,7 @@ export default function Workspace() {
     });
     channel.close();
 
+    // Fetch datasets BEFORE setting selectedWell to avoid DataBrowser rendering without data
     if (!well.datasets && well.path) {
       try {
         // Use /api/wells/data as the single canonical endpoint
@@ -1255,13 +1254,22 @@ export default function Workspace() {
           wellName: wellData.wellName || well.name,
           _dataLoadTimestamp: Date.now(), // Track when data was loaded
         };
-        setSelectedWell(updatedWell);
+        
+        // Update wells array first
         setWells((prev) =>
           prev.map((w) => (w.id === well.id ? updatedWell : w)),
         );
+        
+        // Then set as selected (now has datasets attached)
+        setSelectedWell(updatedWell);
       } catch (error) {
         console.error("Error loading well data:", error);
+        // Still set the well even if fetch fails
+        setSelectedWell(well);
       }
+    } else {
+      // Well already has datasets or no path
+      setSelectedWell(well);
     }
   };
 
@@ -1475,7 +1483,9 @@ export default function Workspace() {
     // If LINKED (isLocked=true), follow global selection
     // If UNLINKED (isLocked=false), stay on locked well
     if (lockState && !lockState.isLocked && lockState.lockedWell) {
-      return lockState.lockedWell;
+      // Return the updated version from wells array (has datasets loaded)
+      const updatedWell = wells.find(w => w.id === lockState.lockedWell?.id);
+      return updatedWell || lockState.lockedWell;
     }
     return selectedWell;
   };

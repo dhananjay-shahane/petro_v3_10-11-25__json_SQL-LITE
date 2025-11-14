@@ -211,19 +211,24 @@ async def load_all_wells(request: LoadAllWellsRequest):
         total_count = 0
         loaded_count = 0
         
+        # Use FileWellStorage cache instead of reading from disk
+        file_storage = get_file_well_storage()
+        
         for filename in os.listdir(wells_folder):
             if filename.endswith('.ptrc'):
                 total_count += 1
-                file_path = os.path.join(wells_folder, filename)
                 well_name = filename.replace('.ptrc', '')
                 
                 try:
-                    well = Well.deserialize(filepath=file_path)
-                    well_data = well.to_dict()
-                    wells_dict[well_name] = well_data
-                    loaded_count += 1
-                    print(f"[LoadAllWells] Loaded well '{well_name}' from {filename}")
-                    # Note: Well data is stored in .ptrc files, not SQLite
+                    # Fetch from cache (already preloaded at startup)
+                    well_data_dict = file_storage.load_well_data(project_path, well_name)
+                    if well_data_dict:
+                        wells_dict[well_name] = well_data_dict
+                        loaded_count += 1
+                        print(f"[LoadAllWells] Loaded well '{well_name}' from cache")
+                    else:
+                        failed_wells.append({"well": well_name, "error": "Well not found in cache"})
+                        print(f"[LoadAllWells] Failed to load well '{well_name}': not in cache")
                 except Exception as e:
                     failed_wells.append({"well": well_name, "error": str(e)})
                     print(f"[LoadAllWells] Failed to load well '{well_name}': {e}")
