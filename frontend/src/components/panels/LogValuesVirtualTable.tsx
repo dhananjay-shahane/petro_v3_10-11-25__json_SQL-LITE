@@ -71,7 +71,7 @@ const LogValuesVirtualTable = memo(function LogValuesVirtualTable({
         {logs.map((log, index) => (
           <div
             key={index}
-            className="flex-1 px-4 py-2 text-left font-semibold text-foreground border-r border-border last:border-r-0 overflow-hidden text-ellipsis whitespace-nowrap overflow-auto relative"
+            className="flex-1 px-4 py-2 text-left font-semibold text-foreground border-r border-border last:border-r-0 overflow-hidden text-ellipsis whitespace-nowrap relative"
           >
             {log.name}
           </div>
