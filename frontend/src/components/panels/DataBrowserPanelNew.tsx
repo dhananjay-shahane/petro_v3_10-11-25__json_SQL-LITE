@@ -609,11 +609,14 @@ export default function DataBrowserPanelNew({
       );
     }
 
-    const numReadings = selectedDataset.well_logs[0]?.log?.length || 0;
+    const logs = selectedDataset?.well_logs ?? [];
+    const numReadings = logs.length > 0
+      ? Math.max(...logs.map(log => log.log?.length || 0), 0)
+      : 0;
 
     return (
       <LogValuesVirtualTable
-        logs={selectedDataset.well_logs}
+        logs={logs}
         rowCount={numReadings}
         height={600}
       />
@@ -825,10 +828,7 @@ export default function DataBrowserPanelNew({
           </Button>
         </div>
 
-        <div
-          className="flex-1 overflow-auto bg-white dark:bg-background min-h-0"
-          style={{ direction: "rtl", overflowY: "auto", height: "300px" }}
-        >
+        <div className="flex-1 overflow-auto bg-white dark:bg-background min-h-0">
           {activeTab === "logs" && renderLogsTab()}
           {activeTab === "logValues" && renderLogValuesTab()}
           {activeTab === "constants" && renderConstantsTab()}

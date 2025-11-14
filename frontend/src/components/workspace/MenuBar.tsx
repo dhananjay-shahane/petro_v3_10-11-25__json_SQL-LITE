@@ -90,14 +90,30 @@ export default function MenuBar({
   }, [projectPath]);
 
   const loadSavedLayoutsList = async () => {
-    if (!projectPath) return;
+    if (!projectPath) {
+      setSavedLayouts(['default']);
+      return;
+    }
+    
     try {
       const response = await axios.get(`/api/workspace/layouts/list?projectPath=${encodeURIComponent(projectPath)}`);
-      if (response.data.success) {
-        setSavedLayouts(response.data.layouts);
+      
+      if (response.data && response.data.success === true) {
+        const layouts = Array.isArray(response.data.layouts) ? response.data.layouts : [];
+        if (layouts.length === 0) {
+          setSavedLayouts(['default']);
+        } else if (!layouts.includes('default')) {
+          setSavedLayouts(['default', ...layouts]);
+        } else {
+          setSavedLayouts(layouts);
+        }
+      } else {
+        console.warn('[MenuBar] API returned non-success response:', response.data);
+        setSavedLayouts(['default']);
       }
     } catch (error) {
       console.error('[MenuBar] Error loading saved layouts:', error);
+      setSavedLayouts(['default']);
     }
   };
 
