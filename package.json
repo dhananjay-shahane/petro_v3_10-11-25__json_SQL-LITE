@@ -17,6 +17,8 @@
   "dependencies": {
     "@babel/traverse": "^7.28.5",
     "@babel/types": "^7.28.5",
-    "react-dropzone": "^14.3.8"
+    "@types/react-window": "^1.8.8",
+    "react-dropzone": "^14.3.8",
+    "react-window": "^2.2.3"
   }
 }

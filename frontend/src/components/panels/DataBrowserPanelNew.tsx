@@ -1,5 +1,5 @@
 import { Button } from "@/components/ui/button";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { WellData } from "../workspace/Workspace";
 import axios from "axios";
 import { useToast } from "@/hooks/use-toast";
@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import LogValuesVirtualTable from "./LogValuesVirtualTable";
 
 interface WellLog {
   name: string;
@@ -49,6 +50,7 @@ export default function DataBrowserPanelNew({
   onDatasetSelect,
   isLocked,
   onToggleLock,
+  onRequestWellRefresh,
 }: {
   selectedWell?: WellData | null;
   projectPath?: string;
@@ -57,6 +59,7 @@ export default function DataBrowserPanelNew({
   onDatasetSelect?: (dataset: Dataset) => void;
   isLocked?: boolean;
   onToggleLock?: () => void;
+  onRequestWellRefresh?: (wellName: string) => Promise<void>;
 }) {
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState("logs");
@@ -235,16 +238,18 @@ export default function DataBrowserPanelNew({
     { id: "constants", label: "Constants" },
   ];
 
-  const groupedDatasets = datasets.reduce(
-    (acc, dataset) => {
-      if (!acc[dataset.type]) {
-        acc[dataset.type] = [];
-      }
-      acc[dataset.type].push(dataset);
-      return acc;
-    },
-    {} as Record<string, Dataset[]>,
-  );
+  const groupedDatasets = useMemo(() => {
+    return datasets.reduce(
+      (acc, dataset) => {
+        if (!acc[dataset.type]) {
+          acc[dataset.type] = [];
+        }
+        acc[dataset.type].push(dataset);
+        return acc;
+      },
+      {} as Record<string, Dataset[]>,
+    );
+  }, [datasets]);
 
   const toggleType = (type: string) => {
     const newExpanded = new Set(expandedTypes);
@@ -256,7 +261,7 @@ export default function DataBrowserPanelNew({
     setExpandedTypes(newExpanded);
   };
 
-  const handleDatasetClick = (dataset: Dataset) => {
+  const handleDatasetClick = useCallback((dataset: Dataset) => {
     setSelectedDataset(dataset);
     setCheckedLogs(new Set());
     setCheckedConstants(new Set());
@@ -268,9 +273,9 @@ export default function DataBrowserPanelNew({
       (window as any).addAppLog(message, 'info');
     }
     console.log(`[DataBrowser] ${message}`);
-  };
+  }, [selectedWell?.name]);
 
-  const handleLogCheckboxChange = (logName: string) => {
+  const handleLogCheckboxChange = useCallback((logName: string) => {
     setCheckedLogs((prev) => {
       const newSet = new Set(prev);
       if (newSet.has(logName)) {
@@ -281,7 +286,7 @@ export default function DataBrowserPanelNew({
       console.log('[DataBrowser] Checked logs:', Array.from(newSet));
       return newSet;
     });
-  };
+  }, []);
 
   // Notify parent when dataset selection changes (moved to useEffect to avoid setState during render warning)
   useEffect(() => {
@@ -299,7 +304,7 @@ export default function DataBrowserPanelNew({
     }
   }, [checkedLogs, onGeneratePlot]);
 
-  const handleConstantCheckboxChange = (constantName: string) => {
+  const handleConstantCheckboxChange = useCallback((constantName: string) => {
     setCheckedConstants((prev) => {
       const newSet = new Set(prev);
       if (newSet.has(constantName)) {
@@ -309,9 +314,9 @@ export default function DataBrowserPanelNew({
       }
       return newSet;
     });
-  };
+  }, []);
 
-  const handleGeneratePlot = () => {
+  const handleGeneratePlot = useCallback(() => {
     const selectedLogNames = Array.from(checkedLogs);
     console.log('[DataBrowser] Generate plot clicked with logs:', selectedLogNames);
     if (selectedLogNames.length > 0 && onGeneratePlot) {
@@ -319,7 +324,7 @@ export default function DataBrowserPanelNew({
     } else {
       console.log('[DataBrowser] Cannot generate: no logs selected or no callback');
     }
-  };
+  }, [checkedLogs, onGeneratePlot]);
 
 
   const handleAddLog = async () => {
@@ -360,16 +365,9 @@ export default function DataBrowserPanelNew({
         setNewLogType("float");
         setShowAddLogDialog(false);
         
-        // Reload well data
-        const dataResponse = await fetch(`/api/wells/data?wellPath=${encodeURIComponent(selectedWell.path)}`);
-        const data = await dataResponse.json();
-        if (data.datasets) {
-          setDatasets(data.datasets);
-          // Select MANUAL_DATA dataset
-          const manualDataset = data.datasets.find((d: Dataset) => d.name === 'MANUAL_DATA');
-          if (manualDataset) {
-            setSelectedDataset(manualDataset);
-          }
+        // Request Workspace to refresh well data
+        if (onRequestWellRefresh) {
+          await onRequestWellRefresh(selectedWell.name);
         }
       } else {
         toast({
@@ -425,16 +423,9 @@ export default function DataBrowserPanelNew({
         setNewConstantTag("");
         setShowAddConstantDialog(false);
         
-        // Reload well data
-        const dataResponse = await fetch(`/api/wells/data?wellPath=${encodeURIComponent(selectedWell.path)}`);
-        const data = await dataResponse.json();
-        if (data.datasets) {
-          setDatasets(data.datasets);
-          // Select MANUAL_DATA dataset
-          const manualDataset = data.datasets.find((d: Dataset) => d.name === 'MANUAL_DATA');
-          if (manualDataset) {
-            setSelectedDataset(manualDataset);
-          }
+        // Request Workspace to refresh well data
+        if (onRequestWellRefresh) {
+          await onRequestWellRefresh(selectedWell.name);
         }
       } else {
         toast({
@@ -599,39 +590,11 @@ export default function DataBrowserPanelNew({
     const numReadings = selectedDataset.well_logs[0]?.log?.length || 0;
 
     return (
-      <table className="w-full max-w-24">
-        <thead className="sticky top-0 bg-muted dark:bg-card border-b border-border">
-          <tr className="h-10">
-            {selectedDataset.well_logs.map((log, index) => (
-              <th
-                key={index}
-                className="px-4 py-2 text-left font-semibold text-foreground border-r border-border"
-              >
-                {log.name}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {Array.from({ length: numReadings }, (_, rowIndex) => (
-            <tr
-              key={rowIndex}
-              className="border-b border-border hover:bg-accent"
-            >
-              {selectedDataset.well_logs.map((log, colIndex) => (
-                <td
-                  key={colIndex}
-                  className="px-4 py-2 text-foreground border-r border-border"
-                >
-                  {log.log[rowIndex] !== null && log.log[rowIndex] !== undefined
-                    ? log.log[rowIndex]
-                    : "-"}
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <LogValuesVirtualTable
+        logs={selectedDataset.well_logs}
+        rowCount={numReadings}
+        height={600}
+      />
     );
   };
 
