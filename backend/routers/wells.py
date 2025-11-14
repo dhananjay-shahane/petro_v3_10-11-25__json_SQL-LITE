@@ -6,6 +6,7 @@ import lasio
 import hashlib
 import json
 import time
+import asyncio
 from pathlib import Path
 from datetime import datetime
 from uuid import uuid4
@@ -79,19 +80,22 @@ def store_well_in_session(well_path: str, well_data: dict):
         return None
 
 
-def fetch_well_data(project_path: str, well_id: str):
+async def fetch_well_data(project_path: str, well_id: str):
     """
     Fetch well data using file-based storage with project-aware cache.
     Returns tuple of (Well object, well_data dict, source)
     
     This helper ensures all endpoints use consistent data retrieval logic.
-    Source will be: "memory-preload", "memory-lazy", "memory-saved", or "disk"
+    Source will be: "memory-preload", "memory-lazy", or "memory-saved"
+    
+    NOTE: This function ONLY serves data from cache. There is NO disk fallback.
+    If data is not cached, an HTTP 404 exception is raised.
     """
     # Get the file-based storage service
     storage = get_file_well_storage()
     
-    # Try to load from file storage (prioritizes cache)
-    well_data = storage.load_well_data(project_path, well_id)
+    # Try to load from file storage cache
+    well_data = await asyncio.to_thread(storage.load_well_data, project_path, well_id)
     
     if well_data:
         # Data was served from cache (memory)
@@ -100,25 +104,16 @@ def fetch_well_data(project_path: str, well_id: str):
         source = cache_entry.get("source", "unknown")
         print(f"[WellFetch] Served well '{well_id}' from memory ({source})")
         
-        # Reconstruct Well object from data
-        well = Well.from_dict(well_data)
+        # Reconstruct Well object from data (non-blocking)
+        well = await asyncio.to_thread(Well.from_dict, well_data)
         return well, well_data, f"memory-{source}"
     
-    # If not found, check if file exists on disk (fallback - should rarely happen with eager loading)
-    wells_folder = os.path.join(project_path, "10-WELLS")
-    well_file = os.path.join(wells_folder, f"{well_id}.ptrc")
-    
-    if not os.path.exists(well_file):
-        raise HTTPException(status_code=404, detail=f"Well {well_id} not found")
-    
-    print(f"[WellFetch] WARNING: Loading well '{well_id}' directly from disk (not cached): {well_file}")
-    well = Well.deserialize(filepath=well_file)
-    well_data = well.to_dict()
-    
-    # Store in session metadata
-    store_well_in_session(well_file, well_data)
-    
-    return well, well_data, "disk"
+    # Well not found in cache - raise 404
+    print(f"[WellFetch] ERROR: Well '{well_id}' not found in cache for project '{project_path}'")
+    raise HTTPException(
+        status_code=404, 
+        detail=f"Well '{well_id}' not found. The well may not be loaded in cache. Try switching projects or reloading."
+    )
 
 
 def get_batch_session_dir(session_id: str) -> Path:
@@ -374,11 +369,12 @@ async def create_from_las(
                 # Use cache-backed fetch to load existing well
                 storage = get_file_well_storage()
                 well_data = storage.load_well_data(resolved_project_path, well_name)
-                if well_data:
-                    well = Well.from_dict(well_data)
-                else:
-                    # Fallback only if not in cache (shouldn't happen)
-                    well = Well.deserialize(filepath=well_file_path)
+                if not well_data:
+                    raise HTTPException(
+                        status_code=500, 
+                        detail=f"Well '{well_name}' exists on disk but not loaded in cache. Please reload the project."
+                    )
+                well = Well.from_dict(well_data)
                 
                 # Implement versioning: if dataset name exists, auto-increment (MAIN, MAIN_1, MAIN_2, etc.)
                 existing_dataset_names = [dtst.name for dtst in well.datasets]
@@ -830,7 +826,7 @@ async def load_well(filePath: str):
         # Use cache-backed fetch instead of direct file read
         well_name = os.path.basename(resolved_path).replace('.ptrc', '')
         project_path = os.path.dirname(os.path.dirname(resolved_path))
-        well, well_data, source = fetch_well_data(project_path, well_name)
+        well, well_data, source = await fetch_well_data(project_path, well_name)
         
         well_data = well.to_dict()
         store_well_in_session(resolved_path, well_data)
@@ -903,7 +899,7 @@ async def get_well_data(wellPath: str):
         project_path = os.path.dirname(os.path.dirname(resolved_path))
         
         # Use cache-backed fetch instead of multiple paths
-        well, well_data, source = fetch_well_data(project_path, well_name)
+        well, well_data, source = await fetch_well_data(project_path, well_name)
         
         store_well_in_session(resolved_path, well_data)
         
@@ -976,7 +972,7 @@ async def get_dataset_details(wellPath: str, datasetName: str):
         # Use cache-backed fetch instead of direct file read
         well_name = os.path.basename(resolved_path).replace('.ptrc', '')
         project_path = os.path.dirname(os.path.dirname(resolved_path))
-        well, well_data, source = fetch_well_data(project_path, well_name)
+        well, well_data, source = await fetch_well_data(project_path, well_name)
         
         target_dataset = None
         for dataset in well.datasets:
@@ -1069,40 +1065,11 @@ async def list_wells(projectPath: str):
                         "datasets": len(well_data.get('datasets', []))  # Keep just the count
                     })
             wells.sort(key=lambda x: x['name'])
-            if wells:
-                return {"wells": wells}
+            return {"wells": wells}
         
-        # Fallback: read from .ptrc files directly
-        wells_folder = os.path.join(resolved_path, "10-WELLS")
-        
-        # If wells folder doesn't exist, return empty list (not an error)
-        if not os.path.exists(wells_folder):
-            print(f"[Wells API] Wells folder does not exist: {wells_folder}")
-            return {"wells": []}
-        
-        wells = []
-        for filename in os.listdir(wells_folder):
-            if filename.endswith('.ptrc'):
-                file_path = os.path.join(wells_folder, filename)
-                try:
-                    # Use cache-backed fetch instead of direct file read
-                    well_id = filename.replace('.ptrc', '')
-                    well_data = get_file_well_storage().load_well_data(resolved_path, well_id)
-                    if well_data:
-                        wells.append({
-                            "id": well_data.get('name', well_id),
-                            "name": well_data.get('name', well_id),
-                            "type": well_data.get('well_type', 'Dev'),
-                            "path": file_path,
-                            "created_at": well_data.get('date_created'),
-                            "datasets": len(well_data.get('datasets', []))
-                        })
-                except Exception as e:
-                    print(f"Error loading well {filename}: {e}")
-                    continue
-        
-        wells.sort(key=lambda x: x['name'])
-        return {"wells": wells}
+        # No wells found in cache index - return empty list
+        print(f"[Wells API] No wells found in cache for project: {resolved_path}")
+        return {"wells": []}
         
     except HTTPException:
         raise
@@ -1134,7 +1101,7 @@ async def get_well_datasets(projectPath: str, wellName: str):
             raise HTTPException(status_code=404, detail=f"Well {wellName} not found")
         
         # Use cache-backed fetch instead of direct file read
-        well, well_data, source = fetch_well_data(resolved_path, wellName)
+        well, well_data, source = await fetch_well_data(resolved_path, wellName)
         
         # well_data is already available from fetch_well_data
         store_well_in_session(well_file, well_data)
@@ -1224,8 +1191,8 @@ async def generate_log_plot(well_id: str, data: LogPlotRequest):
                 detail="Access denied: path outside petrophysics-workplace"
             )
         
-        # Use helper to fetch from SQLite first, fallback to disk
-        well, well_data, source = fetch_well_data(resolved_path, well_id)
+        # Fetch well data from cache only
+        well, well_data, source = await fetch_well_data(resolved_path, well_id)
         print(f"[LOG PLOT] Well loaded successfully: {well.well_name}")
         print(f"[LOG PLOT] Number of datasets: {len(well.datasets)}")
         
@@ -1309,7 +1276,7 @@ async def generate_cross_plot(well_id: str, data: CrossPlotRequest):
             raise HTTPException(status_code=404, detail=f"Well {well_id} not found")
         
         # Use cache-backed fetch instead of direct file read
-        well, well_data, source = fetch_well_data(resolved_path, well_id)
+        well, well_data, source = await fetch_well_data(resolved_path, well_id)
         print(f"[CROSS PLOT] Well loaded successfully from {source}: {well.well_name}")
         print(f"[CROSS PLOT] Number of datasets: {len(well.datasets)}")
         
@@ -1383,7 +1350,7 @@ async def generate_cpi_plot(well_id: str, data: LogPlotRequest):
             raise HTTPException(status_code=404, detail=f"Well {well_id} not found")
         
         # Use cache-backed fetch instead of direct file read
-        well, well_data, source = fetch_well_data(resolved_path, well_id)
+        well, well_data, source = await fetch_well_data(resolved_path, well_id)
         print(f"[CPI PLOT] Well loaded from {source}: {well.well_name}")
         
         # Find XML layout file

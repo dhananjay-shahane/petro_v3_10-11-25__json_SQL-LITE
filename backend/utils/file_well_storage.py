@@ -115,14 +115,10 @@ class FileWellStorageService:
         
         # Check if file exists in index
         if file_key not in self.file_index:
-            # Fallback: try direct path construction
-            well_file = os.path.join(project_path, "10-WELLS", f"{well_id}.ptrc")
-            if not os.path.exists(well_file):
-                print(f"[FileWellStorage] File not found: {file_key}")
-                return None
-            file_path = well_file
-        else:
-            file_path = self.file_index[file_key]
+            print(f"[FileWellStorage] File not found in index: {file_key}")
+            return None
+        
+        file_path = self.file_index[file_key]
         
         # Load the file
         try:
