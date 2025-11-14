@@ -81,38 +81,44 @@ def store_well_in_session(well_path: str, well_data: dict):
 
 def fetch_well_data(project_path: str, well_id: str):
     """
-    Fetch well data using file-based storage with LRU cache.
-    Returns tuple of (Well object, well_data dict)
+    Fetch well data using file-based storage with project-aware cache.
+    Returns tuple of (Well object, well_data dict, source)
     
     This helper ensures all endpoints use consistent data retrieval logic.
+    Source will be: "memory-preload", "memory-lazy", "memory-saved", or "disk"
     """
     # Get the file-based storage service
     storage = get_file_well_storage()
     
-    # Try to load from file storage (with LRU cache)
+    # Try to load from file storage (prioritizes cache)
     well_data = storage.load_well_data(project_path, well_id)
     
     if well_data:
-        print(f"[WellFetch] Loaded well '{well_id}' from file storage (cached or disk)")
+        # Data was served from cache (memory)
+        file_key = storage.get_file_key(project_path, well_id)
+        cache_entry = storage.cache.get(file_key, {})
+        source = cache_entry.get("source", "unknown")
+        print(f"[WellFetch] Served well '{well_id}' from memory ({source})")
+        
         # Reconstruct Well object from data
         well = Well.from_dict(well_data)
-        return well, well_data
+        return well, well_data, f"memory-{source}"
     
-    # If not found, check if file exists on disk (fallback)
+    # If not found, check if file exists on disk (fallback - should rarely happen with eager loading)
     wells_folder = os.path.join(project_path, "10-WELLS")
     well_file = os.path.join(wells_folder, f"{well_id}.ptrc")
     
     if not os.path.exists(well_file):
         raise HTTPException(status_code=404, detail=f"Well {well_id} not found")
     
-    print(f"[WellFetch] Loading well '{well_id}' from disk (direct): {well_file}")
+    print(f"[WellFetch] WARNING: Loading well '{well_id}' directly from disk (not cached): {well_file}")
     well = Well.deserialize(filepath=well_file)
     well_data = well.to_dict()
     
     # Store in session metadata
     store_well_in_session(well_file, well_data)
     
-    return well, well_data
+    return well, well_data, "disk"
 
 
 def get_batch_session_dir(session_id: str) -> Path:
@@ -879,19 +885,23 @@ async def get_well_data(wellPath: str):
         well_name = os.path.basename(resolved_path).replace('.ptrc', '')
         project_path = os.path.dirname(os.path.dirname(resolved_path))
         
-        # Load from file storage (with LRU cache)
+        # Load from file storage (uses project-aware cache)
         storage = get_file_well_storage()
         well_data = storage.load_well_data(project_path, well_name)
         
         if well_data:
-            print(f"[DataAPI] Loaded well '{well_name}' from file storage (cached or disk)")
+            # Check cache source for accurate logging
+            file_key = storage.get_file_key(project_path, well_name)
+            cache_entry = storage.cache.get(file_key, {})
+            source = cache_entry.get("source", "unknown")
+            print(f"[DataAPI] Served well '{well_name}' from memory ({source})")
             well = Well.from_dict(well_data)
         else:
-            # Fallback if not in index
+            # Fallback if not in index (should rarely happen with eager loading)
             if not os.path.exists(resolved_path):
                 raise HTTPException(status_code=404, detail="Well file not found")
             
-            print(f"[DataAPI] Loading complete well data for '{well_name}' from disk (direct)")
+            print(f"[DataAPI] WARNING: Loading well '{well_name}' directly from disk (not cached)")
             well = Well.deserialize(filepath=resolved_path)
             well_data = well.to_dict()
         
@@ -1208,7 +1218,7 @@ async def generate_log_plot(well_id: str, data: LogPlotRequest):
             )
         
         # Use helper to fetch from SQLite first, fallback to disk
-        well, well_data = fetch_well_data(resolved_path, well_id)
+        well, well_data, source = fetch_well_data(resolved_path, well_id)
         print(f"[LOG PLOT] Well loaded successfully: {well.well_name}")
         print(f"[LOG PLOT] Number of datasets: {len(well.datasets)}")
         

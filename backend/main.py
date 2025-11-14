@@ -11,7 +11,8 @@ from starlette.middleware.sessions import SessionMiddleware
 from pathlib import Path
 
 from routers import workspace, projects, directories, data, wells, sessions, well_sessions, cli, storage_inspector, file_upload, workspace_sync, tops, settings
-from utils.file_well_storage import initialize_file_well_storage
+from utils.file_well_storage import initialize_file_well_storage, get_file_well_storage
+from utils.sqlite_storage import SQLiteStorageService
 from dependencies import WORKSPACE_ROOT
 
 
@@ -31,10 +32,37 @@ async def lifespan(app: FastAPI):
     print("=" * 60)
     
     try:
+        # Step 1: Index all well file paths
         initialize_file_well_storage(WORKSPACE_ROOT)
-        print("[STARTUP] Well file indexing complete. App is ready.")
+        print("[STARTUP] Well file indexing complete.")
+        
+        # Step 2: Eager load current project wells into memory
+        storage_service = SQLiteStorageService()
+        current_project = storage_service.load_current_project()
+        
+        if current_project and current_project.get("projectPath"):
+            project_path = current_project["projectPath"]
+            print(f"[STARTUP] Found current project: {project_path}")
+            
+            # Preload all wells for the current project
+            file_storage = get_file_well_storage()
+            stats = await file_storage.preload_project(project_path)
+            
+            print(f"[STARTUP] EAGER LOADING complete: {stats['loaded_wells']}/{stats['total_wells']} wells loaded into memory")
+        else:
+            # Fallback: try to load from default project folder
+            default_project = Path(WORKSPACE_ROOT) / "project"
+            if default_project.exists():
+                print(f"[STARTUP] No current project found, using default: {default_project}")
+                file_storage = get_file_well_storage()
+                stats = await file_storage.preload_project(str(default_project))
+                print(f"[STARTUP] EAGER LOADING complete: {stats['loaded_wells']}/{stats['total_wells']} wells loaded into memory")
+            else:
+                print("[STARTUP] No current project found. Wells will be loaded on-demand.")
+        
+        print("[STARTUP] App is ready.")
     except Exception as e:
-        print(f"[STARTUP] Warning: Failed to index well files: {e}")
+        print(f"[STARTUP] Warning: Failed to initialize storage: {e}")
         import traceback
         traceback.print_exc()
     

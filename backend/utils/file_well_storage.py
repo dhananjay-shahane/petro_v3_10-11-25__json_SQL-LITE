@@ -1,25 +1,30 @@
 """
 File-based Well Storage Service for Petrophysics Workspace
-Uses .ptrc (JSON) files with in-memory LRU cache for efficient lazy loading
+Uses .ptrc (JSON) files with in-memory cache for eager/lazy loading
 SQLite is NOT used for well data - only for other data types
 """
 
 import json
 import glob
 import os
+import asyncio
 from collections import OrderedDict
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple
 from pathlib import Path
 
 
 # Global index to store file paths (loaded during startup)
 GLOBAL_FILE_INDEX: Dict[str, str] = {}
 
-# Simple in-memory LRU cache (loaded on-demand during requests)
-IN_MEMORY_CACHE: OrderedDict[str, Any] = OrderedDict()
+# Project-aware in-memory cache with metadata
+# Structure: {cache_key: {"data": well_dict, "source": "preload|lazy", "project": project_name}}
+IN_MEMORY_CACHE: OrderedDict[str, Dict[str, Any]] = OrderedDict()
 
-# Cache size limit (store up to 50 well files in memory)
-MAX_CACHE_SIZE = 50
+# Track which projects have been preloaded
+PRELOADED_PROJECTS: set = set()
+
+# Cache size limit (store up to 100 well files in memory for eager loading)
+MAX_CACHE_SIZE = 100
 
 
 class FileWellStorageService:
@@ -79,7 +84,7 @@ class FileWellStorageService:
     
     def load_well_data(self, project_path: str, well_id: str) -> Optional[Dict[str, Any]]:
         """
-        Load well data with LRU caching and lazy loading.
+        Load well data with project-aware caching (eager or lazy).
         
         Args:
             project_path: Path to the project directory
@@ -89,13 +94,16 @@ class FileWellStorageService:
             Well data dictionary or None if not found
         """
         file_key = self.get_file_key(project_path, well_id)
+        project_name = os.path.basename(os.path.normpath(project_path))
         
         # --- 1. Check Cache (Hit) ---
         if file_key in self.cache:
-            print(f"[FileWellStorage] Cache HIT for {file_key}")
+            cache_entry = self.cache[file_key]
+            source = cache_entry.get("source", "unknown")
+            print(f"[FileWellStorage] Cache HIT for {file_key} (served from memory, {source})")
             # Move to end to mark as most recently used (LRU logic)
             self.cache.move_to_end(file_key)
-            return self.cache[file_key]
+            return cache_entry["data"]
         
         # --- 2. Load Lazily (Miss) ---
         print(f"[FileWellStorage] Cache MISS for {file_key}, loading from disk...")
@@ -127,8 +135,12 @@ class FileWellStorageService:
             oldest_key, _ = self.cache.popitem(last=False)
             print(f"[FileWellStorage] Cache full. Evicting oldest entry: {oldest_key}")
         
-        # Add newly loaded data to cache
-        self.cache[file_key] = data
+        # Add newly loaded data to cache with metadata
+        self.cache[file_key] = {
+            "data": data,
+            "source": "lazy",
+            "project": project_name
+        }
         print(f"[FileWellStorage] Cached: {file_key} (cache size: {len(self.cache)}/{MAX_CACHE_SIZE})")
         
         return data
@@ -169,17 +181,25 @@ class FileWellStorageService:
                 self.file_index[file_key] = file_path
             
             # Update cache (or add if not present)
+            project_name = os.path.basename(os.path.normpath(project_path))
+            
             if file_key in self.cache:
                 # Move to end since it was just modified
                 self.cache.move_to_end(file_key)
-            
-            # Always update the cached data
-            if len(self.cache) >= MAX_CACHE_SIZE and file_key not in self.cache:
-                # Need to evict oldest
-                oldest_key, _ = self.cache.popitem(last=False)
-                print(f"[FileWellStorage] Cache full. Evicting: {oldest_key}")
-            
-            self.cache[file_key] = well_data
+                # Update the data but keep existing source metadata
+                self.cache[file_key]["data"] = well_data
+            else:
+                # Need to add to cache
+                if len(self.cache) >= MAX_CACHE_SIZE:
+                    # Need to evict oldest
+                    oldest_key, _ = self.cache.popitem(last=False)
+                    print(f"[FileWellStorage] Cache full. Evicting: {oldest_key}")
+                
+                self.cache[file_key] = {
+                    "data": well_data,
+                    "source": "saved",
+                    "project": project_name
+                }
             
             return True
             
@@ -257,13 +277,151 @@ class FileWellStorageService:
             print(f"[FileWellStorage] Error deleting well: {e}")
             return False
     
+    async def preload_project(self, project_path: str, max_concurrent: int = 10) -> Dict[str, Any]:
+        """
+        EAGER LOADING: Preload all wells from a project into memory at startup.
+        
+        Uses asyncio.to_thread to prevent blocking the event loop during file I/O.
+        
+        Args:
+            project_path: Path to the project directory
+            max_concurrent: Maximum concurrent file loads (default: 10)
+            
+        Returns:
+            Dictionary with preload statistics
+        """
+        project_name = os.path.basename(os.path.normpath(project_path))
+        
+        # Check if already preloaded
+        if project_name in PRELOADED_PROJECTS:
+            print(f"[FileWellStorage] Project '{project_name}' already preloaded, skipping...")
+            return {
+                "project": project_name,
+                "already_loaded": True,
+                "total_wells": 0,
+                "loaded_wells": 0,
+                "failed_wells": []
+            }
+        
+        print(f"[FileWellStorage] EAGER LOADING: Preloading all wells for project '{project_name}'...")
+        
+        # Find all wells for this project
+        wells_to_load = []
+        for key, file_path in self.file_index.items():
+            if key.startswith(f"{project_name}::"):
+                wells_to_load.append((key, file_path))
+        
+        if not wells_to_load:
+            print(f"[FileWellStorage] No wells found for project '{project_name}'")
+            PRELOADED_PROJECTS.add(project_name)
+            return {
+                "project": project_name,
+                "total_wells": 0,
+                "loaded_wells": 0,
+                "failed_wells": []
+            }
+        
+        # Use semaphore to limit concurrent I/O operations
+        semaphore = asyncio.Semaphore(max_concurrent)
+        loaded_count = 0
+        failed_wells = []
+        
+        async def load_well_async(file_key: str, file_path: str) -> Tuple[str, bool, Optional[Dict]]:
+            """Load a single well file asynchronously"""
+            async with semaphore:
+                try:
+                    # Use asyncio.to_thread to run blocking I/O in thread pool
+                    data = await asyncio.to_thread(self._load_well_file_sync, file_path)
+                    return (file_key, True, data)
+                except Exception as e:
+                    print(f"[FileWellStorage] Failed to preload {file_key}: {e}")
+                    return (file_key, False, None)
+        
+        # Load all wells concurrently
+        tasks = [load_well_async(key, path) for key, path in wells_to_load]
+        results = await asyncio.gather(*tasks)
+        
+        # Process results and update cache
+        for file_key, success, data in results:
+            if success and data:
+                # Add to cache with preload metadata
+                if len(self.cache) >= MAX_CACHE_SIZE:
+                    # For preload, prioritize keeping preloaded data
+                    # Evict lazy-loaded entries first
+                    evicted = False
+                    for key in list(self.cache.keys()):
+                        if self.cache[key].get("source") == "lazy":
+                            del self.cache[key]
+                            print(f"[FileWellStorage] Evicting lazy entry to make room for preload: {key}")
+                            evicted = True
+                            break
+                    
+                    # If no lazy entries, evict oldest
+                    if not evicted:
+                        oldest_key, _ = self.cache.popitem(last=False)
+                        print(f"[FileWellStorage] Cache full. Evicting oldest: {oldest_key}")
+                
+                self.cache[file_key] = {
+                    "data": data,
+                    "source": "preload",
+                    "project": project_name
+                }
+                loaded_count += 1
+            else:
+                failed_wells.append(file_key)
+        
+        # Mark project as preloaded
+        PRELOADED_PROJECTS.add(project_name)
+        
+        print(f"[FileWellStorage] Preloaded {loaded_count}/{len(wells_to_load)} wells for project '{project_name}'")
+        print(f"[FileWellStorage] Cache now contains {len(self.cache)} wells")
+        
+        return {
+            "project": project_name,
+            "total_wells": len(wells_to_load),
+            "loaded_wells": loaded_count,
+            "failed_wells": failed_wells
+        }
+    
+    def _load_well_file_sync(self, file_path: str) -> Dict[str, Any]:
+        """
+        Synchronous file loading helper for asyncio.to_thread.
+        Reads and parses JSON from disk.
+        """
+        with open(file_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    
+    def clear_project_cache(self, project_path: str) -> int:
+        """
+        Clear all cached wells for a specific project.
+        Useful when switching projects.
+        
+        Returns:
+            Number of cache entries cleared
+        """
+        project_name = os.path.basename(os.path.normpath(project_path))
+        keys_to_remove = [
+            key for key in self.cache.keys()
+            if self.cache[key].get("project") == project_name
+        ]
+        
+        for key in keys_to_remove:
+            del self.cache[key]
+        
+        # Remove from preloaded set
+        PRELOADED_PROJECTS.discard(project_name)
+        
+        print(f"[FileWellStorage] Cleared {len(keys_to_remove)} wells from cache for project '{project_name}'")
+        return len(keys_to_remove)
+    
     def get_cache_stats(self) -> Dict[str, Any]:
         """Get cache statistics for monitoring"""
         return {
             "cache_size": len(self.cache),
             "max_cache_size": MAX_CACHE_SIZE,
             "indexed_files": len(self.file_index),
-            "cached_wells": list(self.cache.keys())
+            "cached_wells": list(self.cache.keys()),
+            "preloaded_projects": list(PRELOADED_PROJECTS)
         }
 
 
