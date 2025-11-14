@@ -3,7 +3,7 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { WellData } from "../workspace/Workspace";
 import axios from "axios";
 import { useToast } from "@/hooks/use-toast";
-import { LinkIcon, Unlink, ChevronDown, ChevronRight } from 'lucide-react';
+import { LinkIcon, Unlink, ChevronDown, ChevronRight } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -69,8 +69,10 @@ export default function DataBrowserPanelNew({
     new Set(["Special", "Point", "Continuous", "Tops"]),
   );
   const [checkedLogs, setCheckedLogs] = useState<Set<string>>(new Set());
-  const [checkedConstants, setCheckedConstants] = useState<Set<string>>(new Set());
-  
+  const [checkedConstants, setCheckedConstants] = useState<Set<string>>(
+    new Set(),
+  );
+
   // Dialog states
   const [showAddLogDialog, setShowAddLogDialog] = useState(false);
   const [showAddConstantDialog, setShowAddConstantDialog] = useState(false);
@@ -92,66 +94,72 @@ export default function DataBrowserPanelNew({
     const abortController = new AbortController();
     let timeoutId: NodeJS.Timeout | null = null;
     let isTimeout = false;
-    
+
     // ALWAYS clear data immediately when well or project changes to prevent stale data
     setDatasets([]);
     setSelectedDataset(null);
     setCheckedLogs(new Set());
     setCheckedConstants(new Set());
-    
+
     // Early exit if no well selected
     if (!selectedWell?.path) {
       return;
     }
-    
+
     // Critical check: verify the well belongs to the current project BEFORE fetching data
     if (selectedWell.path && projectPath) {
-      const wellBelongsToProject = 
-        selectedWell.path === projectPath || 
-        selectedWell.path.startsWith(projectPath + '/') || 
-        selectedWell.path.startsWith(projectPath + '\\');
-      
+      const wellBelongsToProject =
+        selectedWell.path === projectPath ||
+        selectedWell.path.startsWith(projectPath + "/") ||
+        selectedWell.path.startsWith(projectPath + "\\");
+
       if (!wellBelongsToProject) {
         console.log(
           "[DataBrowser] Well doesn't belong to current project - clearing and returning. Well path:",
           selectedWell.path,
           "Project path:",
-          projectPath
+          projectPath,
         );
         return;
       }
     }
-    
+
     // Use datasets from Workspace if already loaded (avoids duplicate API call)
     // Check for timestamp to confirm data was actually fetched (handles empty dataset arrays correctly)
-    const hasLoadedData = (selectedWell as any)?._dataLoadTimestamp || (selectedWell as any)?._refreshTimestamp;
+    const hasLoadedData =
+      (selectedWell as any)?._dataLoadTimestamp ||
+      (selectedWell as any)?._refreshTimestamp;
     const hasDatasets = Array.isArray((selectedWell as any).datasets);
-    
+
     console.log("[DataBrowser] Debug:", {
       wellName: selectedWell?.name,
       hasLoadedData,
       hasDatasets,
       datasetCount: hasDatasets ? (selectedWell as any).datasets.length : 0,
-      timestamp: hasLoadedData
+      timestamp: hasLoadedData,
     });
-    
+
     if (hasLoadedData && hasDatasets) {
-      console.log("[DataBrowser] ✅ Using datasets from Workspace (already loaded in memory)");
+      console.log(
+        "[DataBrowser] ✅ Using datasets from Workspace (already loaded in memory)",
+      );
       const wellDatasets = (selectedWell as any).datasets as Dataset[];
       setDatasets(wellDatasets);
-      
+
       // Select dataset with priority: selectedDatasetProp → first dataset
       if (selectedDatasetProp) {
         setSelectedDataset(selectedDatasetProp);
       } else if (wellDatasets.length > 0) {
         setSelectedDataset(wellDatasets[0]);
       }
-      
+
       return; // Skip API fetch - data already available from Workspace
     }
-    
-    console.log("[DataBrowser] ⚠️ Datasets not available from Workspace, fetching from API...");
-    
+
+    console.log(
+      "[DataBrowser] ⚠️ Datasets not available from Workspace, fetching from API...",
+    );
+
     const loadWellData = async () => {
       if (!selectedWell?.path) {
         return;
@@ -163,10 +171,10 @@ export default function DataBrowserPanelNew({
           isTimeout = true;
           abortController.abort();
         }, 300000);
-        
+
         const response = await fetch(
           `/api/wells/data?wellPath=${encodeURIComponent(selectedWell.path)}`,
-          { signal: abortController.signal }
+          { signal: abortController.signal },
         );
 
         // Clear timeout on successful response
@@ -175,7 +183,7 @@ export default function DataBrowserPanelNew({
         const contentType = response.headers.get("content-type");
         if (contentType && contentType.includes("application/json")) {
           const data = await response.json();
-          
+
           if (response.ok && data.datasets && Array.isArray(data.datasets)) {
             setDatasets(data.datasets);
             if (data.datasets.length > 0) {
@@ -202,15 +210,16 @@ export default function DataBrowserPanelNew({
       } catch (error: any) {
         // Clear timeout on error
         if (timeoutId) clearTimeout(timeoutId);
-        
-        if (error.name === 'AbortError' && isTimeout) {
+
+        if (error.name === "AbortError" && isTimeout) {
           console.error("Error loading well data: Request timed out");
           toast({
             title: "Timeout Error",
-            description: "Loading well data took too long. The dataset may be very large.",
+            description:
+              "Loading well data took too long. The dataset may be very large.",
             variant: "destructive",
           });
-        } else if (error.name === 'AbortError') {
+        } else if (error.name === "AbortError") {
           // Silently ignore - request was aborted when switching wells (expected behavior)
           return;
         } else {
@@ -225,12 +234,17 @@ export default function DataBrowserPanelNew({
     };
 
     loadWellData();
-    
+
     return () => {
       if (timeoutId) clearTimeout(timeoutId);
       abortController.abort();
     };
-  }, [selectedWell, projectPath, (selectedWell as any)?._dataLoadTimestamp, (selectedWell as any)?._refreshTimestamp]);
+  }, [
+    selectedWell,
+    projectPath,
+    (selectedWell as any)?._dataLoadTimestamp,
+    (selectedWell as any)?._refreshTimestamp,
+  ]);
 
   const tabs = [
     { id: "logs", label: "Logs" },
@@ -261,19 +275,22 @@ export default function DataBrowserPanelNew({
     setExpandedTypes(newExpanded);
   };
 
-  const handleDatasetClick = useCallback((dataset: Dataset) => {
-    setSelectedDataset(dataset);
-    setCheckedLogs(new Set());
-    setCheckedConstants(new Set());
-    
-    // Log dataset selection to feedback panel
-    const wellName = selectedWell?.name || 'Unknown well';
-    const message = `Data Browser: Selected dataset "${dataset.name}" (${dataset.type}) for well "${wellName}"`;
-    if ((window as any).addAppLog) {
-      (window as any).addAppLog(message, 'info');
-    }
-    console.log(`[DataBrowser] ${message}`);
-  }, [selectedWell?.name]);
+  const handleDatasetClick = useCallback(
+    (dataset: Dataset) => {
+      setSelectedDataset(dataset);
+      setCheckedLogs(new Set());
+      setCheckedConstants(new Set());
+
+      // Log dataset selection to feedback panel
+      const wellName = selectedWell?.name || "Unknown well";
+      const message = `Data Browser: Selected dataset "${dataset.name}" (${dataset.type}) for well "${wellName}"`;
+      if ((window as any).addAppLog) {
+        (window as any).addAppLog(message, "info");
+      }
+      console.log(`[DataBrowser] ${message}`);
+    },
+    [selectedWell?.name],
+  );
 
   const handleLogCheckboxChange = useCallback((logName: string) => {
     setCheckedLogs((prev) => {
@@ -283,7 +300,7 @@ export default function DataBrowserPanelNew({
       } else {
         newSet.add(logName);
       }
-      console.log('[DataBrowser] Checked logs:', Array.from(newSet));
+      console.log("[DataBrowser] Checked logs:", Array.from(newSet));
       return newSet;
     });
   }, []);
@@ -299,7 +316,7 @@ export default function DataBrowserPanelNew({
   useEffect(() => {
     const selectedLogNames = Array.from(checkedLogs);
     if (selectedLogNames.length > 0 && onGeneratePlot) {
-      console.log('[DataBrowser] Auto-generating plot for:', selectedLogNames);
+      console.log("[DataBrowser] Auto-generating plot for:", selectedLogNames);
       onGeneratePlot(selectedLogNames);
     }
   }, [checkedLogs, onGeneratePlot]);
@@ -318,14 +335,18 @@ export default function DataBrowserPanelNew({
 
   const handleGeneratePlot = useCallback(() => {
     const selectedLogNames = Array.from(checkedLogs);
-    console.log('[DataBrowser] Generate plot clicked with logs:', selectedLogNames);
+    console.log(
+      "[DataBrowser] Generate plot clicked with logs:",
+      selectedLogNames,
+    );
     if (selectedLogNames.length > 0 && onGeneratePlot) {
       onGeneratePlot(selectedLogNames);
     } else {
-      console.log('[DataBrowser] Cannot generate: no logs selected or no callback');
+      console.log(
+        "[DataBrowser] Cannot generate: no logs selected or no callback",
+      );
     }
   }, [checkedLogs, onGeneratePlot]);
-
 
   const handleAddLog = async () => {
     if (!selectedWell || !projectPath) {
@@ -348,9 +369,9 @@ export default function DataBrowserPanelNew({
 
     try {
       const command = `INSERT_LOG ${selectedWell.name} ${newLogName} "${newLogDescription}" ${newLogType}`;
-      const response = await axios.post('/api/cli/execute', {
+      const response = await axios.post("/api/cli/execute", {
         command,
-        projectPath
+        projectPath,
       });
 
       if (response.data.success) {
@@ -358,13 +379,13 @@ export default function DataBrowserPanelNew({
           title: "Log Added",
           description: `Log '${newLogName}' has been added`,
         });
-        
+
         // Reset form
         setNewLogName("");
         setNewLogDescription("");
         setNewLogType("float");
         setShowAddLogDialog(false);
-        
+
         // Request Workspace to refresh well data
         if (onRequestWellRefresh) {
           await onRequestWellRefresh(selectedWell.name);
@@ -406,9 +427,9 @@ export default function DataBrowserPanelNew({
 
     try {
       const command = `INSERT_CONSTANT ${selectedWell.name} ${newConstantName} ${newConstantValue} ${newConstantTag} "${newConstantTag}"`;
-      const response = await axios.post('/api/cli/execute', {
+      const response = await axios.post("/api/cli/execute", {
         command,
-        projectPath
+        projectPath,
       });
 
       if (response.data.success) {
@@ -416,13 +437,13 @@ export default function DataBrowserPanelNew({
           title: "Constant Added",
           description: `Constant '${newConstantName}' has been added`,
         });
-        
+
         // Reset form
         setNewConstantName("");
         setNewConstantValue("");
         setNewConstantTag("");
         setShowAddConstantDialog(false);
-        
+
         // Request Workspace to refresh well data
         if (onRequestWellRefresh) {
           await onRequestWellRefresh(selectedWell.name);
@@ -465,27 +486,28 @@ export default function DataBrowserPanelNew({
       let command: string;
       let outputPath: string;
       let fileExtension: string;
-      
+
       // Check if this is a TOPS dataset
-      const isTopsDataset = selectedDataset.type === 'Tops' || 
-                           selectedDataset.type === 'Point' || 
-                           selectedDataset.name === 'TOPS';
-      
+      const isTopsDataset =
+        selectedDataset.type === "Tops" ||
+        selectedDataset.type === "Point" ||
+        selectedDataset.name === "TOPS";
+
       if (isTopsDataset) {
         // Export TOPS to CSV
-        fileExtension = 'csv';
+        fileExtension = "csv";
         outputPath = `04-OUTPUT/${selectedWell.name}_${selectedDataset.name}.csv`;
         command = `EXPORT_TOPS ${selectedWell.name} ${outputPath}`;
       } else {
         // Export regular dataset to LAS
-        fileExtension = 'las';
+        fileExtension = "las";
         outputPath = `04-OUTPUT/${selectedWell.name}_${selectedDataset.name}.las`;
         command = `EXPORT_TO_LAS ${selectedWell.name} ${selectedDataset.name} ${outputPath}`;
       }
-      
-      const response = await axios.post('/api/cli/execute', {
+
+      const response = await axios.post("/api/cli/execute", {
         command,
-        projectPath
+        projectPath,
       });
 
       if (response.data.success) {
@@ -547,20 +569,20 @@ export default function DataBrowserPanelNew({
           {selectedDataset.well_logs.map((log, index) => (
             <tr key={index} className="border-b border-border hover:bg-accent">
               <td className="px-2">
-                <input 
-                  type="checkbox" 
-                  className="cursor-pointer" 
+                <input
+                  type="checkbox"
+                  className="cursor-pointer"
                   checked={checkedLogs.has(log.name)}
                   onChange={() => handleLogCheckboxChange(log.name)}
                 />
               </td>
-              <td 
+              <td
                 className="px-4 py-2 text-foreground cursor-move hover:bg-primary/10"
                 draggable={true}
                 onDragStart={(e) => {
-                  e.dataTransfer.effectAllowed = 'copy';
-                  e.dataTransfer.setData('application/x-log-name', log.name);
-                  e.dataTransfer.setData('text/plain', log.name);
+                  e.dataTransfer.effectAllowed = "copy";
+                  e.dataTransfer.setData("application/x-log-name", log.name);
+                  e.dataTransfer.setData("text/plain", log.name);
                 }}
                 title="Drag to Well Log Plot to add"
               >
@@ -627,8 +649,8 @@ export default function DataBrowserPanelNew({
           {selectedDataset.constants.map((constant, index) => (
             <tr key={index} className="border-b border-border hover:bg-accent">
               <td className="px-2">
-                <input 
-                  type="checkbox" 
+                <input
+                  type="checkbox"
                   className="cursor-pointer"
                   checked={checkedConstants.has(constant.name)}
                   onChange={() => handleConstantCheckboxChange(constant.name)}
@@ -644,11 +666,13 @@ export default function DataBrowserPanelNew({
     );
   };
 
-  const wellBelongsToProject = selectedWell && selectedWell.path && projectPath && (
-    selectedWell.path === projectPath || 
-    selectedWell.path.startsWith(projectPath + '/') || 
-    selectedWell.path.startsWith(projectPath + '\\')
-  );
+  const wellBelongsToProject =
+    selectedWell &&
+    selectedWell.path &&
+    projectPath &&
+    (selectedWell.path === projectPath ||
+      selectedWell.path.startsWith(projectPath + "/") ||
+      selectedWell.path.startsWith(projectPath + "\\"));
 
   // Show empty state when no well is selected
   if (!selectedWell || !wellBelongsToProject) {
@@ -656,9 +680,12 @@ export default function DataBrowserPanelNew({
       <div className="flex h-full items-center justify-center bg-muted/20">
         <div className="text-center p-8">
           <div className="text-6xl mb-4 text-muted-foreground/40">📊</div>
-          <h3 className="text-lg font-medium text-foreground mb-2">No Well Selected</h3>
+          <h3 className="text-lg font-medium text-foreground mb-2">
+            No Well Selected
+          </h3>
           <p className="text-sm text-muted-foreground max-w-md">
-            Please select a well from the Wells panel to view its data, logs, and constants.
+            Please select a well from the Wells panel to view its data, logs,
+            and constants.
           </p>
         </div>
       </div>
@@ -666,7 +693,10 @@ export default function DataBrowserPanelNew({
   }
 
   return (
-    <div className="flex h-full overflow-scroll" style={{ fontSize: 'var(--font-size-data-browser, 14px)' }}>
+    <div
+      className="flex h-full overflow-scroll"
+      style={{ fontSize: "var(--font-size-data-browser, 14px)" }}
+    >
       <div className="w-64 border-r border-border bg-muted dark:bg-card/50 flex flex-col">
         <div className="p-3 border-b border-border">
           <div className="flex items-center justify-between gap-2">
@@ -677,13 +707,17 @@ export default function DataBrowserPanelNew({
               <button
                 onClick={onToggleLock}
                 className="flex items-center gap-1 px-2 py-1 text-xs rounded-md border border-border hover:border-foreground/30 transition-colors shrink-0 group"
-                title={isLocked ? "Linked - Follows global well selection. Click to unlink" : "Unlinked - Stays on current well. Click to link"}
+                title={
+                  isLocked
+                    ? "Linked - Follows global well selection. Click to unlink"
+                    : "Unlinked - Stays on current well. Click to link"
+                }
               >
-                <span 
-                  key={isLocked ? 'linked' : 'unlinked'}
-                  className="inline-block animate-in fade-in zoom-in duration-300" 
-                  style={{ 
-                    animation: 'spin-scale 0.5s ease-out'
+                <span
+                  key={isLocked ? "linked" : "unlinked"}
+                  className="inline-block animate-in fade-in zoom-in duration-300"
+                  style={{
+                    animation: "spin-scale 0.5s ease-out",
                   }}
                 >
                   {isLocked ? (
@@ -705,19 +739,23 @@ export default function DataBrowserPanelNew({
                 className={`w-full px-3 py-2.5 flex items-center justify-between rounded-md transition-colors ${DATASET_COLORS[type as keyof typeof DATASET_COLORS] || "bg-accent"} hover:opacity-90`}
               >
                 <div className="flex items-center gap-2">
-                  <ChevronRight 
+                  <ChevronRight
                     className="w-4 h-4 text-foreground/70 transition-transform duration-200"
                     style={{
-                      transform: expandedTypes.has(type) ? 'rotate(90deg)' : 'rotate(0deg)'
+                      transform: expandedTypes.has(type)
+                        ? "rotate(90deg)"
+                        : "rotate(0deg)",
                     }}
                   />
-                  <span className="font-medium text-sm text-foreground">{type}</span>
+                  <span className="font-medium text-sm text-foreground">
+                    {type}
+                  </span>
                 </div>
                 <span className="text-xs px-2 py-0.5 rounded-md bg-background/60 text-foreground/70 font-medium">
                   {typeDatasets.length}
                 </span>
               </button>
-              
+
               {expandedTypes.has(type) && (
                 <div className="mt-1 ml-6 space-y-0.5 animate-in fade-in slide-in-from-top-1 duration-200">
                   {typeDatasets.map((dataset, index) => (
@@ -763,24 +801,23 @@ export default function DataBrowserPanelNew({
         </div>
 
         <div className="flex gap-2 p-2 bg-muted dark:bg-card/30 border-b border-border shrink-0">
-          <Button 
-            size="sm" 
-            variant="outline" 
-            disabled={!selectedDataset}
-          >
+          <Button size="sm" variant="outline" disabled={!selectedDataset}>
             Delete
           </Button>
-          <Button 
-            size="sm" 
-            variant="outline" 
+          <Button
+            size="sm"
+            variant="outline"
             onClick={handleAdd}
-            disabled={!selectedWell || (activeTab !== "logs" && activeTab !== "constants")}
+            disabled={
+              !selectedWell ||
+              (activeTab !== "logs" && activeTab !== "constants")
+            }
           >
             Add
           </Button>
-          <Button 
-            size="sm" 
-            variant="outline" 
+          <Button
+            size="sm"
+            variant="outline"
             onClick={handleExport}
             disabled={!selectedDataset}
           >
@@ -788,7 +825,10 @@ export default function DataBrowserPanelNew({
           </Button>
         </div>
 
-        <div className="flex-1 overflow-auto bg-white dark:bg-background min-h-0">
+        <div
+          className="flex-1 overflow-auto bg-white dark:bg-background min-h-0"
+          style={{ direction: "rtl", overflowY: "auto", height: "300px" }}
+        >
           {activeTab === "logs" && renderLogsTab()}
           {activeTab === "logValues" && renderLogValuesTab()}
           {activeTab === "constants" && renderConstantsTab()}
@@ -837,7 +877,10 @@ export default function DataBrowserPanelNew({
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowAddLogDialog(false)}>
+            <Button
+              variant="outline"
+              onClick={() => setShowAddLogDialog(false)}
+            >
               Cancel
             </Button>
             <Button onClick={handleAddLog}>Add Log</Button>
@@ -846,7 +889,10 @@ export default function DataBrowserPanelNew({
       </Dialog>
 
       {/* Add Constant Dialog */}
-      <Dialog open={showAddConstantDialog} onOpenChange={setShowAddConstantDialog}>
+      <Dialog
+        open={showAddConstantDialog}
+        onOpenChange={setShowAddConstantDialog}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Add New Constant</DialogTitle>
@@ -886,7 +932,10 @@ export default function DataBrowserPanelNew({
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowAddConstantDialog(false)}>
+            <Button
+              variant="outline"
+              onClick={() => setShowAddConstantDialog(false)}
+            >
               Cancel
             </Button>
             <Button onClick={handleAddConstant}>Add Constant</Button>

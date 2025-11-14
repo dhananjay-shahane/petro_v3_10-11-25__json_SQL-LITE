@@ -36,6 +36,7 @@ async def lifespan(app: FastAPI):
     Handles startup and shutdown events.
     """
     # STARTUP: Index well files (.ptrc) at application startup
+    
     logger = logging.getLogger(__name__)
     logger.info("=" * 60)
     logger.info("[STARTUP] Initializing File-Based Well Storage...")
