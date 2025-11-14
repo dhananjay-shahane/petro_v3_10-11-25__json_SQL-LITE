@@ -72,6 +72,7 @@ export default function DataBrowserPanelNew({
   const [checkedConstants, setCheckedConstants] = useState<Set<string>>(
     new Set(),
   );
+  const [uiStateLoaded, setUiStateLoaded] = useState(false);
 
   // Dialog states
   const [showAddLogDialog, setShowAddLogDialog] = useState(false);
@@ -89,6 +90,56 @@ export default function DataBrowserPanelNew({
     Continuous: "bg-blue-100 dark:bg-blue-900/30",
     Tops: "bg-purple-100 dark:bg-purple-900/30",
   };
+
+  useEffect(() => {
+    if (!projectPath) return;
+
+    setUiStateLoaded(false);
+
+    const loadUIState = async () => {
+      try {
+        const response = await axios.get(`/api/workspace/ui-state?projectPath=${encodeURIComponent(projectPath)}`);
+        if (response.data.success && response.data.uiState?.dataBrowser) {
+          const { activeTab: savedTab, expandedTypes: savedTypes } = response.data.uiState.dataBrowser;
+          if (savedTab) setActiveTab(savedTab);
+          if (Array.isArray(savedTypes)) {
+            setExpandedTypes(new Set(savedTypes));
+          }
+          console.log('[DataBrowser] UI state loaded:', response.data.uiState.dataBrowser);
+        }
+      } catch (error) {
+        console.error('[DataBrowser] Error loading UI state:', error);
+      } finally {
+        setUiStateLoaded(true);
+      }
+    };
+
+    loadUIState();
+  }, [projectPath]);
+
+  useEffect(() => {
+    if (!projectPath || !uiStateLoaded) return;
+
+    const saveUIState = async () => {
+      try {
+        await axios.patch('/api/workspace/ui-state', {
+          projectPath,
+          uiState: {
+            dataBrowser: {
+              activeTab,
+              expandedTypes: Array.from(expandedTypes),
+            },
+          },
+        });
+        console.log('[DataBrowser] UI state saved');
+      } catch (error) {
+        console.error('[DataBrowser] Error saving UI state:', error);
+      }
+    };
+
+    const timeoutId = setTimeout(saveUIState, 500);
+    return () => clearTimeout(timeoutId);
+  }, [activeTab, expandedTypes, projectPath, uiStateLoaded]);
 
   useEffect(() => {
     const abortController = new AbortController();

@@ -132,10 +132,17 @@ class SQLiteStorageService:
                     active_well TEXT,
                     selected_wells TEXT,
                     cli_history TEXT,
+                    ui_state TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+            
+            try:
+                cursor.execute("ALTER TABLE projects ADD COLUMN ui_state TEXT")
+                print("  [STORAGE] Added ui_state column to projects table")
+            except Exception:
+                pass
             
             # Layouts table
             cursor.execute("""
@@ -677,6 +684,55 @@ class SQLiteStorageService:
                 return row['cli_history']
             
             return ""
+    
+    def save_ui_state(self, project_path: str, ui_state: dict):
+        """Save UI state for a project"""
+        with _lock:
+            conn = _get_connection()
+            cursor = conn.cursor()
+            
+            try:
+                now = datetime.utcnow().isoformat()
+                session_id = _generate_session_id(project_path)
+                ui_state_json = json.dumps(ui_state)
+                
+                cursor.execute("""
+                    INSERT OR IGNORE INTO projects (session_id, project_path, updated_at)
+                    VALUES (?, ?, ?)
+                """, (session_id, project_path, now))
+                
+                cursor.execute("""
+                    UPDATE projects SET ui_state = ?, updated_at = ? WHERE session_id = ?
+                """, (ui_state_json, now, session_id))
+                
+                conn.commit()
+                print(f"  [STORAGE] Saved UI state for project {project_path}")
+                
+            except Exception as e:
+                conn.rollback()
+                print(f"  [STORAGE] Error saving UI state: {e}")
+    
+    def load_ui_state(self, project_path: str) -> Optional[dict]:
+        """Load UI state for a project"""
+        with _lock:
+            conn = _get_connection()
+            cursor = conn.cursor()
+            
+            session_id = _generate_session_id(project_path)
+            
+            cursor.execute("SELECT ui_state FROM projects WHERE session_id = ?", (session_id,))
+            row = cursor.fetchone()
+            
+            if row and row['ui_state']:
+                try:
+                    ui_state = json.loads(row['ui_state'])
+                    print(f"  [STORAGE] Retrieved UI state for project {project_path}")
+                    return ui_state
+                except json.JSONDecodeError as e:
+                    print(f"  [STORAGE] Error decoding UI state: {e}")
+                    return None
+            
+            return None
     
     def save_current_project(self, project_path: str, project_name: str):
         """Save the currently opened project information"""

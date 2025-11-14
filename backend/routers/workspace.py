@@ -355,3 +355,50 @@ async def get_linked_windows(window_id: str, projectPath: str):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get linked windows: {str(e)}")
+
+
+class UIStateRequest(BaseModel):
+    projectPath: str
+    uiState: dict
+
+
+@router.patch("/ui-state")
+async def save_ui_state(request: UIStateRequest):
+    """Save UI state for a project"""
+    try:
+        validate_path(request.projectPath)
+        cache_service.save_ui_state(request.projectPath, request.uiState)
+        return {
+            "success": True,
+            "message": "UI state saved successfully"
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save UI state: {str(e)}")
+
+
+@router.get("/ui-state")
+async def load_ui_state(projectPath: str):
+    """Load UI state for a project"""
+    try:
+        validate_path(projectPath)
+        ui_state = cache_service.load_ui_state(projectPath)
+        
+        if ui_state is None:
+            ui_state = {
+                "dataBrowser": {
+                    "activeTab": "logs",
+                    "expandedTypes": ["Special", "Point", "Continuous", "Tops"]
+                }
+            }
+        
+        return {
+            "success": True,
+            "uiState": ui_state,
+            "message": "UI state loaded successfully"
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to load UI state: {str(e)}")
