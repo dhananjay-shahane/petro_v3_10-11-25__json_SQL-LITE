@@ -1,0 +1,78 @@
+[1:30 am, 13/11/2025] Rajesh Kumar: # app.py
+from contextlib import asynccontextmanager
+import json
+import glob
+from fastapi import FastAPI
+from typing import Dict, Any
+
+# Global index to store file paths (loaded during startup)
+GLOBAL_FILE_INDEX: Dict[str, str] = {}
+# Simple in-memory cache (loaded on-demand during requests)
+IN_MEMORY_CACHE: Dict[str, Any] = {}
+# Cache size limit (e.g., store up to 50 of the 100MB files)
+MAX_CACHE_SIZE = 50 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # STARTUP: Index the file paths
+    print("Indexing JSON files...")
+    # Adjust the path pattern below to match your file structure
+    file_paths = glob.glob("data_files/*.json") 
+    
+    for path in file_paths:
+        # We use the filename (without extension) as the key for the index
+        file_key = path.split('/')[-1].replace('.json', '')
+        GLOBAL_FILE_INDEX[file_key] = path
+    
+    print(f"Indexed {len(GLOBAL_FILE_INDEX)} files. App is ready.")
+    
+    yield # App starts serving requests
+
+    # SHUTDOWN: Cleanup or save any changes if required
+    print("Server shutting down.")
+    # You would add save logic here if the user can modify the data
+
+app = FastAPI(lifespan=lifespan)
+[1:31 am, 13/11/2025] Rajesh Kumar: # app.py (continued)
+import os 
+from collections import OrderedDict
+
+# Use OrderedDict for simple LRU (Least Recently Used) eviction
+# When a new item is added, the oldest (first) item is removed if the limit is reached.
+IN_MEMORY_CACHE: OrderedDict[str, Any] = OrderedDict() 
+
+def load_data_from_file(file_key: str) -> Any:
+    """Handles cache lookup, lazy loading, and cache management."""
+    
+    # --- 1. Check Cache (Hit) ---
+    if file_key in IN_MEMORY_CACHE:
+        # Move the key to the end to mark it as most recently used (LRU logic)
+        IN_MEMORY_CACHE.move_to_end(file_key)
+        return IN_MEMORY_CACHE[file_key]
+        
+    # --- 2. Load Lazily (Miss) ---
+    if file_key not in GLOBAL_FILE_INDEX:
+        raise FileNotFoundError(f"File key '{file_key}' not found in index.")
+        
+    file_path = GLOBAL_FILE_INDEX[file_key]
+    
+    try:
+        with open(file_path, "r") as f:
+            data = json.load(f)
+    except Exception as e:
+        print(f"Error loading {file_path}: {e}")
+        return {}
+        
+    # --- 3. Update Cache & Evict Oldest ---
+    
+    # Check if the cache is full
+    if len(IN_MEMORY_CACHE) >= MAX_CACHE_SIZE:
+        # Pop the oldest item (first item in OrderedDict)
+        oldest_key, _ = IN_MEMORY_CACHE.popitem(last=False) 
+        print(f"Cache full. Evicting oldest entry: {oldest_key}")
+
+    # Add the newly loaded data to the cache
+    IN_MEMORY_CACHE[file_key] = data
+    print(f"Lazily loaded and cached: {file_key}")
+    
+    return data

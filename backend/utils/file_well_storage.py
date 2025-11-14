@@ -23,8 +23,13 @@ IN_MEMORY_CACHE: OrderedDict[str, Dict[str, Any]] = OrderedDict()
 # Track which projects have been preloaded
 PRELOADED_PROJECTS: set = set()
 
-# Cache size limit (store up to 100 well files in memory for eager loading)
-MAX_CACHE_SIZE = 100
+# Active project (protected from eviction)
+ACTIVE_PROJECT: Optional[str] = None
+
+# Cache size limit (soft limit - preloaded projects can exceed this)
+# Lazy-loaded wells are evicted when cache exceeds this limit
+MAX_CACHE_SIZE = 200
+LAZY_CACHE_SIZE = 50  # Max lazy-loaded wells before eviction
 
 
 class FileWellStorageService:
@@ -127,13 +132,20 @@ class FileWellStorageService:
             print(f"[FileWellStorage] Error loading {file_path}: {e}")
             return None
         
-        # --- 3. Update Cache & Evict Oldest ---
+        # --- 3. Update Cache & Smart Eviction ---
         
-        # Check if cache is full
-        if len(self.cache) >= MAX_CACHE_SIZE:
-            # Pop the oldest item (first item in OrderedDict)
-            oldest_key, _ = self.cache.popitem(last=False)
-            print(f"[FileWellStorage] Cache full. Evicting oldest entry: {oldest_key}")
+        # Count lazy-loaded entries
+        lazy_count = sum(1 for entry in self.cache.values() if entry.get("source") == "lazy")
+        
+        # Evict if too many lazy entries (protect preloaded/active project entries)
+        if lazy_count >= LAZY_CACHE_SIZE:
+            # Find and evict oldest lazy entry
+            for key in list(self.cache.keys()):
+                entry = self.cache[key]
+                if entry.get("source") == "lazy" and entry.get("project") != ACTIVE_PROJECT:
+                    del self.cache[key]
+                    print(f"[FileWellStorage] Evicting lazy entry: {key}")
+                    break
         
         # Add newly loaded data to cache with metadata
         self.cache[file_key] = {
@@ -141,7 +153,7 @@ class FileWellStorageService:
             "source": "lazy",
             "project": project_name
         }
-        print(f"[FileWellStorage] Cached: {file_key} (cache size: {len(self.cache)}/{MAX_CACHE_SIZE})")
+        print(f"[FileWellStorage] Cached: {file_key} (cache size: {len(self.cache)}, lazy: {lazy_count + 1})")
         
         return data
     
@@ -342,25 +354,9 @@ class FileWellStorageService:
         results = await asyncio.gather(*tasks)
         
         # Process results and update cache
+        # NO EVICTION during preload - allow cache to grow for active project
         for file_key, success, data in results:
             if success and data:
-                # Add to cache with preload metadata
-                if len(self.cache) >= MAX_CACHE_SIZE:
-                    # For preload, prioritize keeping preloaded data
-                    # Evict lazy-loaded entries first
-                    evicted = False
-                    for key in list(self.cache.keys()):
-                        if self.cache[key].get("source") == "lazy":
-                            del self.cache[key]
-                            print(f"[FileWellStorage] Evicting lazy entry to make room for preload: {key}")
-                            evicted = True
-                            break
-                    
-                    # If no lazy entries, evict oldest
-                    if not evicted:
-                        oldest_key, _ = self.cache.popitem(last=False)
-                        print(f"[FileWellStorage] Cache full. Evicting oldest: {oldest_key}")
-                
                 self.cache[file_key] = {
                     "data": data,
                     "source": "preload",
@@ -370,11 +366,13 @@ class FileWellStorageService:
             else:
                 failed_wells.append(file_key)
         
-        # Mark project as preloaded
+        # Mark project as preloaded and active
         PRELOADED_PROJECTS.add(project_name)
+        global ACTIVE_PROJECT
+        ACTIVE_PROJECT = project_name
         
         print(f"[FileWellStorage] Preloaded {loaded_count}/{len(wells_to_load)} wells for project '{project_name}'")
-        print(f"[FileWellStorage] Cache now contains {len(self.cache)} wells")
+        print(f"[FileWellStorage] Cache now contains {len(self.cache)} wells (active project protected)")
         
         return {
             "project": project_name,

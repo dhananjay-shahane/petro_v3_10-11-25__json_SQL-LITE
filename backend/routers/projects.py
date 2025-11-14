@@ -8,6 +8,7 @@ from dependencies import WORKSPACE_ROOT, validate_path
 from utils.project_utils import create_project_structure
 from utils.fe_data_objects import Well
 from utils.sqlite_storage import SQLiteStorageService
+from utils.file_well_storage import get_file_well_storage
 
 cache_service = SQLiteStorageService()
 
@@ -257,6 +258,7 @@ async def set_current_project(request: SetCurrentProjectRequest):
     """
     Set the current opened project in JSON storage memory.
     This is called when a user opens an existing project.
+    Also triggers eager loading of all wells for the new project.
     """
     try:
         project_path = os.path.abspath(request.projectPath)
@@ -273,9 +275,24 @@ async def set_current_project(request: SetCurrentProjectRequest):
         if not os.path.isdir(project_path):
             raise HTTPException(status_code=400, detail="Path is not a directory")
         
+        # Save current project
         cache_service.save_current_project(project_path, request.projectName)
         
         print(f"[Projects] Current project set to: {request.projectName} at {project_path}")
+        
+        # EAGER LOADING: Preload all wells for the new project
+        try:
+            file_storage = get_file_well_storage()
+            
+            # Clear previous project cache (optional - saves memory)
+            # We could skip this if we want to keep multiple projects in cache
+            
+            # Preload the new project
+            stats = await file_storage.preload_project(project_path)
+            print(f"[Projects] Preloaded {stats['loaded_wells']}/{stats['total_wells']} wells for new project")
+        except Exception as e:
+            print(f"[Projects] Warning: Failed to preload wells: {e}")
+            # Don't fail the request if preload fails - wells will lazy load instead
         
         return {
             "success": True,
