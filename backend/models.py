@@ -371,3 +371,35 @@ class LASBatchImportResponse(CustomBase):
     message: str
     results: List[LASBatchImportFileResult]
     summary: LASBatchImportSummary
+
+
+class LogMetadata(CustomBase):
+    name: str
+    log_type: str
+    description: Optional[str] = ""
+    unit: Optional[str] = ""
+
+
+class ConstantMetadata(CustomBase):
+    name: str
+    value: Any
+    tag: Optional[str] = ""
+
+
+class DatasetMetadata(CustomBase):
+    name: str
+    type: str
+    wellname: str
+    index_name: str
+    log_count: int
+    constant_count: int
+    logs: List[LogMetadata]
+    constants: List[ConstantMetadata]
+
+
+class WellMetadataResponse(CustomBase):
+    success: bool
+    wellName: str
+    wellType: Optional[str] = ""
+    dateCreated: Optional[str] = ""
+    datasets: List[DatasetMetadata]

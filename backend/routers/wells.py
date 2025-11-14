@@ -20,7 +20,8 @@ from models import (
     WellListResponse, WellDatasetsResponse, LogPlotRequest,
     LogPlotResponse, CrossPlotRequest, CrossPlotResponse, LogMessage,
     LASBatchPreviewItem, LASBatchPreviewResponse, LASBatchImportRequest,
-    LASBatchImportFileResult, LASBatchImportSummary, LASBatchImportResponse
+    LASBatchImportFileResult, LASBatchImportSummary, LASBatchImportResponse,
+    LogMetadata, ConstantMetadata, DatasetMetadata, WellMetadataResponse
 )
 from dependencies import (
     WORKSPACE_ROOT, validate_path, allowed_file, sanitize_list
@@ -161,6 +162,84 @@ def cleanup_old_batch_sessions(ttl_hours: int = 1):
                     print(f"[Cleanup] Removed old batch session: {session_dir.name}")
                 except Exception as e:
                     print(f"[Cleanup] Failed to remove {session_dir.name}: {e}")
+
+
+@router.get("/metadata", response_model=WellMetadataResponse)
+async def get_well_metadata(wellPath: str):
+    """
+    Get lightweight well metadata (dataset/log names) without actual log data.
+    This endpoint returns only metadata for fast UI rendering.
+    Use /wells/data endpoint when you need the actual log values for plotting.
+    """
+    try:
+        if not wellPath:
+            raise HTTPException(status_code=400, detail="Well path is required")
+        
+        resolved_path = os.path.abspath(wellPath)
+        if not validate_path(resolved_path):
+            raise HTTPException(
+                status_code=403,
+                detail="Access denied: path outside petrophysics-workplace"
+            )
+        
+        if not resolved_path.endswith('.ptrc'):
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid file type. Only .ptrc files are supported"
+            )
+        
+        well_name = os.path.basename(resolved_path).replace('.ptrc', '')
+        project_path = os.path.dirname(os.path.dirname(resolved_path))
+        
+        well, well_data, source = await fetch_well_data(project_path, well_name)
+        
+        datasets_metadata = []
+        for dataset in well.datasets:
+            logs_metadata = []
+            for log in dataset.well_logs:
+                logs_metadata.append(LogMetadata(
+                    name=log.name,
+                    log_type=getattr(log, 'log_type', 'float'),
+                    description=getattr(log, 'description', ''),
+                    unit=getattr(log, 'unit', '')
+                ))
+            
+            constants_metadata = []
+            if hasattr(dataset, 'constants') and dataset.constants:
+                for const in dataset.constants:
+                    constants_metadata.append(ConstantMetadata(
+                        name=const.name,
+                        value=const.value,
+                        tag=getattr(const, 'tag', '')
+                    ))
+            
+            datasets_metadata.append(DatasetMetadata(
+                name=dataset.name,
+                type=dataset.type,
+                wellname=dataset.wellname,
+                index_name=getattr(dataset, 'index_name', 'DEPTH'),
+                log_count=len(dataset.well_logs),
+                constant_count=len(constants_metadata),
+                logs=logs_metadata,
+                constants=constants_metadata
+            ))
+        
+        print(f"[MetadataFetch] Returned metadata for well '{well_name}' from cache ({source})")
+        
+        return WellMetadataResponse(
+            success=True,
+            wellName=well.well_name,
+            wellType=getattr(well, 'well_type', ''),
+            dateCreated=str(well.date_created) if hasattr(well, 'date_created') else '',
+            datasets=datasets_metadata
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[MetadataFetch] Error fetching metadata: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/preview-las", response_model=LASPreviewResponse)
