@@ -8,6 +8,7 @@ import json
 import glob
 import os
 import asyncio
+import threading
 from collections import OrderedDict
 from typing import Dict, Any, Optional, List, Tuple
 from pathlib import Path
@@ -30,6 +31,9 @@ ACTIVE_PROJECT: Optional[str] = None
 # Lazy-loaded wells are evicted when cache exceeds this limit
 MAX_CACHE_SIZE = 200
 LAZY_CACHE_SIZE = 50  # Max lazy-loaded wells before eviction
+
+# Thread lock for cache operations to prevent race conditions
+CACHE_LOCK = threading.Lock()
 
 
 class FileWellStorageService:
@@ -87,9 +91,36 @@ class FileWellStorageService:
         project_name = os.path.basename(os.path.normpath(project_path))
         return f"{project_name}::{well_id}"
     
+    def get_cached_well_data(self, project_path: str, well_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get well data from cache only (NO disk access).
+        Thread-safe implementation for concurrent access.
+        
+        Args:
+            project_path: Path to the project directory
+            well_id: Well identifier (filename without extension)
+            
+        Returns:
+            Well data dictionary from cache or None if not cached
+        """
+        file_key = self.get_file_key(project_path, well_id)
+        
+        with CACHE_LOCK:
+            if file_key in self.cache:
+                cache_entry = self.cache[file_key]
+                source = cache_entry.get("source", "unknown")
+                print(f"[FileWellStorage] Cache HIT for {file_key} (served from memory, {source})")
+                # Move to end to mark as most recently used (LRU logic)
+                self.cache.move_to_end(file_key)
+                return cache_entry["data"]
+        
+        print(f"[FileWellStorage] Cache MISS for {file_key} (cache-only mode)")
+        return None
+    
     def load_well_data(self, project_path: str, well_id: str) -> Optional[Dict[str, Any]]:
         """
         Load well data with project-aware caching (eager or lazy).
+        Thread-safe implementation for concurrent access.
         
         Args:
             project_path: Path to the project directory
@@ -101,26 +132,27 @@ class FileWellStorageService:
         file_key = self.get_file_key(project_path, well_id)
         project_name = os.path.basename(os.path.normpath(project_path))
         
-        # --- 1. Check Cache (Hit) ---
-        if file_key in self.cache:
-            cache_entry = self.cache[file_key]
-            source = cache_entry.get("source", "unknown")
-            print(f"[FileWellStorage] Cache HIT for {file_key} (served from memory, {source})")
-            # Move to end to mark as most recently used (LRU logic)
-            self.cache.move_to_end(file_key)
-            return cache_entry["data"]
+        # --- 1. Check Cache (Hit) - Thread-safe ---
+        with CACHE_LOCK:
+            if file_key in self.cache:
+                cache_entry = self.cache[file_key]
+                source = cache_entry.get("source", "unknown")
+                print(f"[FileWellStorage] Cache HIT for {file_key} (served from memory, {source})")
+                # Move to end to mark as most recently used (LRU logic)
+                self.cache.move_to_end(file_key)
+                return cache_entry["data"]
         
         # --- 2. Load Lazily (Miss) ---
         print(f"[FileWellStorage] Cache MISS for {file_key}, loading from disk...")
         
-        # Check if file exists in index
+        # Check if file exists in index (read-only, no lock needed)
         if file_key not in self.file_index:
             print(f"[FileWellStorage] File not found in index: {file_key}")
             return None
         
         file_path = self.file_index[file_key]
         
-        # Load the file
+        # Load the file (I/O outside lock to avoid blocking other requests)
         try:
             with open(file_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
@@ -128,28 +160,33 @@ class FileWellStorageService:
             print(f"[FileWellStorage] Error loading {file_path}: {e}")
             return None
         
-        # --- 3. Update Cache & Smart Eviction ---
-        
-        # Count lazy-loaded entries
-        lazy_count = sum(1 for entry in self.cache.values() if entry.get("source") == "lazy")
-        
-        # Evict if too many lazy entries (protect preloaded/active project entries)
-        if lazy_count >= LAZY_CACHE_SIZE:
-            # Find and evict oldest lazy entry
-            for key in list(self.cache.keys()):
-                entry = self.cache[key]
-                if entry.get("source") == "lazy" and entry.get("project") != ACTIVE_PROJECT:
-                    del self.cache[key]
-                    print(f"[FileWellStorage] Evicting lazy entry: {key}")
-                    break
-        
-        # Add newly loaded data to cache with metadata
-        self.cache[file_key] = {
-            "data": data,
-            "source": "lazy",
-            "project": project_name
-        }
-        print(f"[FileWellStorage] Cached: {file_key} (cache size: {len(self.cache)}, lazy: {lazy_count + 1})")
+        # --- 3. Update Cache & Smart Eviction (Thread-safe) ---
+        with CACHE_LOCK:
+            # Double-check cache after acquiring lock (another thread might have loaded it)
+            if file_key in self.cache:
+                print(f"[FileWellStorage] Another thread already cached {file_key}")
+                return self.cache[file_key]["data"]
+            
+            # Count lazy-loaded entries
+            lazy_count = sum(1 for entry in self.cache.values() if entry.get("source") == "lazy")
+            
+            # Evict if too many lazy entries (protect preloaded/active project entries)
+            if lazy_count >= LAZY_CACHE_SIZE:
+                # Find and evict oldest lazy entry
+                for key in list(self.cache.keys()):
+                    entry = self.cache[key]
+                    if entry.get("source") == "lazy" and entry.get("project") != ACTIVE_PROJECT:
+                        del self.cache[key]
+                        print(f"[FileWellStorage] Evicting lazy entry: {key}")
+                        break
+            
+            # Add newly loaded data to cache with metadata
+            self.cache[file_key] = {
+                "data": data,
+                "source": "lazy",
+                "project": project_name
+            }
+            print(f"[FileWellStorage] Cached: {file_key} (cache size: {len(self.cache)}, lazy: {lazy_count + 1})")
         
         return data
     

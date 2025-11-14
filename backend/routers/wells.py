@@ -30,7 +30,7 @@ from utils.LogPlot import LogPlotManager
 from utils.CPI import CrossPlotManager
 from utils.cpi_plotly import CPIPlotlyManager
 from utils.matplotlib_cpi_plot import MatplotlibCPIPlotter
-from utils.file_well_storage import get_file_well_storage
+from utils.file_well_storage import get_file_well_storage, CACHE_LOCK
 from utils.sqlite_storage import SQLiteStorageService
 from utils.data_import_export import ImportLasFileCommand
 
@@ -82,7 +82,7 @@ def store_well_in_session(well_path: str, well_data: dict):
 
 async def fetch_well_data(project_path: str, well_id: str):
     """
-    Fetch well data using file-based storage with project-aware cache.
+    Fetch well data from cache ONLY - no disk access.
     Returns tuple of (Well object, well_data dict, source)
     
     This helper ensures all endpoints use consistent data retrieval logic.
@@ -94,14 +94,15 @@ async def fetch_well_data(project_path: str, well_id: str):
     # Get the file-based storage service
     storage = get_file_well_storage()
     
-    # Try to load from file storage cache
-    well_data = await asyncio.to_thread(storage.load_well_data, project_path, well_id)
+    # Get data from cache only (NO disk access)
+    well_data = await asyncio.to_thread(storage.get_cached_well_data, project_path, well_id)
     
     if well_data:
         # Data was served from cache (memory)
         file_key = storage.get_file_key(project_path, well_id)
-        cache_entry = storage.cache.get(file_key, {})
-        source = cache_entry.get("source", "unknown")
+        with CACHE_LOCK:
+            cache_entry = storage.cache.get(file_key, {})
+            source = cache_entry.get("source", "unknown")
         print(f"[WellFetch] Served well '{well_id}' from memory ({source})")
         
         # Reconstruct Well object from data (non-blocking)
@@ -112,7 +113,7 @@ async def fetch_well_data(project_path: str, well_id: str):
     print(f"[WellFetch] ERROR: Well '{well_id}' not found in cache for project '{project_path}'")
     raise HTTPException(
         status_code=404, 
-        detail=f"Well '{well_id}' not found. The well may not be loaded in cache. Try switching projects or reloading."
+        detail=f"Well '{well_id}' not found in cache. The well may not be preloaded. Try switching to a different project."
     )
 
 
@@ -366,9 +367,9 @@ async def create_from_las(
             if os.path.exists(well_file_path):
                 logs.append({"message": f"Well \"{well_name}\" already exists, checking for duplicates...", "type": "info"})
                 
-                # Use cache-backed fetch to load existing well
+                # Use cache-only fetch to load existing well
                 storage = get_file_well_storage()
-                well_data = storage.load_well_data(resolved_project_path, well_name)
+                well_data = storage.get_cached_well_data(resolved_project_path, well_name)
                 if not well_data:
                     raise HTTPException(
                         status_code=500, 
@@ -1053,8 +1054,8 @@ async def list_wells(projectPath: str):
             print(f"[Wells API] Found {len(well_ids)} wells in file index")
             wells = []
             for well_id in well_ids:
-                # Load minimal well data from cache (already in memory - no I/O)
-                well_data = storage.load_well_data(resolved_path, well_id)
+                # Load minimal well data from cache only (already in memory - no I/O)
+                well_data = storage.get_cached_well_data(resolved_path, well_id)
                 if well_data:
                     wells.append({
                         "id": well_id,

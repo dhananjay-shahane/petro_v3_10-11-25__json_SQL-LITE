@@ -220,8 +220,8 @@ async def load_all_wells(request: LoadAllWellsRequest):
                 well_name = filename.replace('.ptrc', '')
                 
                 try:
-                    # Fetch from cache (already preloaded at startup)
-                    well_data_dict = file_storage.load_well_data(project_path, well_name)
+                    # Fetch from cache only (already preloaded at startup)
+                    well_data_dict = file_storage.get_cached_well_data(project_path, well_name)
                     if well_data_dict:
                         wells_dict[well_name] = well_data_dict
                         loaded_count += 1
