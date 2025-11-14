@@ -370,7 +370,15 @@ async def create_from_las(
             
             if os.path.exists(well_file_path):
                 logs.append({"message": f"Well \"{well_name}\" already exists, checking for duplicates...", "type": "info"})
-                well = Well.deserialize(filepath=well_file_path)
+                
+                # Use cache-backed fetch to load existing well
+                storage = get_file_well_storage()
+                well_data = storage.load_well_data(resolved_project_path, well_name)
+                if well_data:
+                    well = Well.from_dict(well_data)
+                else:
+                    # Fallback only if not in cache (shouldn't happen)
+                    well = Well.deserialize(filepath=well_file_path)
                 
                 # Implement versioning: if dataset name exists, auto-increment (MAIN, MAIN_1, MAIN_2, etc.)
                 existing_dataset_names = [dtst.name for dtst in well.datasets]
@@ -418,21 +426,16 @@ async def create_from_las(
             
             logs.append({"message": "Saving well to project...", "type": "info"})
             
-            well.serialize(filename=well_file_path)
-            
+            # Save to file-based storage (updates BOTH disk and cache atomically)
             well_data = well.to_dict()
-            store_well_in_session(well_file_path, well_data)
-            
-            # Save to file-based storage (updates cache and index)
-            try:
-                storage = get_file_well_storage()
-                storage.save_well_data(well_data, resolved_project_path)
-                logs.append({"message": "Well saved to file storage", "type": "success"})
-                
-                # Project timestamp is managed by file storage
+            storage = get_file_well_storage()
+            if storage.save_well_data(well_data, resolved_project_path):
+                logs.append({"message": "Well saved to file storage and cache updated", "type": "success"})
+                store_well_in_session(well_file_path, well_data)
                 logs.append({"message": "Project marked as modified", "type": "success"})
-            except Exception as e:
-                logs.append({"message": f"Warning: Failed to save well: {str(e)}", "type": "warning"})
+            else:
+                logs.append({"message": "ERROR: Failed to save well", "type": "error"})
+                raise HTTPException(status_code=500, detail="Failed to save well data")
             
             logs.append({"message": f"SUCCESS: Well saved to: {well_file_path}", "type": "success"})
             
@@ -715,22 +718,33 @@ async def import_las_batch(request: LASBatchImportRequest):
                 
                 datasets_added += 1
                 
-                # Update file storage cache
+                # Update file storage cache after the import wrote to disk
                 try:
                     if well_file_path and os.path.exists(well_file_path):
                         storage = get_file_well_storage()
                         
-                        # CRITICAL: Invalidate cache entry before updating to prevent duplicates
+                        # Reload the fresh well data from disk (the import just wrote it)
+                        with open(well_file_path, "r", encoding="utf-8") as f:
+                            well_data = json.load(f)
+                        
+                        # Update cache with the fresh data
                         project_name = os.path.basename(resolved_project_path)
                         file_key = f"{project_name}::{well_name}"
-                        if storage.cache.pop(file_key, None) is not None:
-                            print(f"[BatchImport] Invalidated cache entry for: {file_key}")
                         
-                        # Load fresh data and save to file-based storage (updates cache and index)
-                        well = Well.deserialize(filepath=well_file_path)
-                        well_data = well.to_dict()
-                        storage.save_well_data(well_data, resolved_project_path)
-                        print(f"[BatchImport] Updated file storage cache for well: {well_name}")
+                        # Update cache entry with fresh data from disk
+                        if file_key in storage.cache:
+                            storage.cache.move_to_end(file_key)
+                            storage.cache[file_key]["data"] = well_data
+                            print(f"[BatchImport] Updated cache entry for: {file_key}")
+                        else:
+                            storage.cache[file_key] = {
+                                "data": well_data,
+                                "source": "saved",
+                                "project": project_name
+                            }
+                            print(f"[BatchImport] Added cache entry for: {file_key}")
+                        
+                        print(f"[BatchImport] Cache synchronized with disk for well: {well_name}")
                 except Exception as storage_err:
                     print(f"[BatchImport] Warning: Failed to update file storage for {well_name}: {storage_err}")
                 
@@ -813,7 +827,10 @@ async def load_well(filePath: str):
                 detail="Invalid file type. Only .ptrc files are supported"
             )
         
-        well = Well.deserialize(filepath=resolved_path)
+        # Use cache-backed fetch instead of direct file read
+        well_name = os.path.basename(resolved_path).replace('.ptrc', '')
+        project_path = os.path.dirname(os.path.dirname(resolved_path))
+        well, well_data, source = fetch_well_data(project_path, well_name)
         
         well_data = well.to_dict()
         store_well_in_session(resolved_path, well_data)
@@ -885,25 +902,8 @@ async def get_well_data(wellPath: str):
         well_name = os.path.basename(resolved_path).replace('.ptrc', '')
         project_path = os.path.dirname(os.path.dirname(resolved_path))
         
-        # Load from file storage (uses project-aware cache)
-        storage = get_file_well_storage()
-        well_data = storage.load_well_data(project_path, well_name)
-        
-        if well_data:
-            # Check cache source for accurate logging
-            file_key = storage.get_file_key(project_path, well_name)
-            cache_entry = storage.cache.get(file_key, {})
-            source = cache_entry.get("source", "unknown")
-            print(f"[DataAPI] Served well '{well_name}' from memory ({source})")
-            well = Well.from_dict(well_data)
-        else:
-            # Fallback if not in index (should rarely happen with eager loading)
-            if not os.path.exists(resolved_path):
-                raise HTTPException(status_code=404, detail="Well file not found")
-            
-            print(f"[DataAPI] WARNING: Loading well '{well_name}' directly from disk (not cached)")
-            well = Well.deserialize(filepath=resolved_path)
-            well_data = well.to_dict()
+        # Use cache-backed fetch instead of multiple paths
+        well, well_data, source = fetch_well_data(project_path, well_name)
         
         store_well_in_session(resolved_path, well_data)
         
@@ -973,7 +973,10 @@ async def get_dataset_details(wellPath: str, datasetName: str):
         if not os.path.exists(resolved_path):
             raise HTTPException(status_code=404, detail="Well file not found")
         
-        well = Well.deserialize(filepath=resolved_path)
+        # Use cache-backed fetch instead of direct file read
+        well_name = os.path.basename(resolved_path).replace('.ptrc', '')
+        project_path = os.path.dirname(os.path.dirname(resolved_path))
+        well, well_data, source = fetch_well_data(project_path, well_name)
         
         target_dataset = None
         for dataset in well.datasets:
@@ -1082,15 +1085,18 @@ async def list_wells(projectPath: str):
             if filename.endswith('.ptrc'):
                 file_path = os.path.join(wells_folder, filename)
                 try:
-                    well = Well.deserialize(filepath=file_path)
-                    wells.append({
-                        "id": well.well_name,
-                        "name": well.well_name,
-                        "type": well.well_type,
-                        "path": file_path,
-                        "created_at": well.date_created.isoformat() if well.date_created else None,
-                        "datasets": len(well.datasets)
-                    })
+                    # Use cache-backed fetch instead of direct file read
+                    well_id = filename.replace('.ptrc', '')
+                    well_data = get_file_well_storage().load_well_data(resolved_path, well_id)
+                    if well_data:
+                        wells.append({
+                            "id": well_data.get('name', well_id),
+                            "name": well_data.get('name', well_id),
+                            "type": well_data.get('well_type', 'Dev'),
+                            "path": file_path,
+                            "created_at": well_data.get('date_created'),
+                            "datasets": len(well_data.get('datasets', []))
+                        })
                 except Exception as e:
                     print(f"Error loading well {filename}: {e}")
                     continue
@@ -1127,9 +1133,10 @@ async def get_well_datasets(projectPath: str, wellName: str):
         if not os.path.exists(well_file):
             raise HTTPException(status_code=404, detail=f"Well {wellName} not found")
         
-        well = Well.deserialize(filepath=well_file)
+        # Use cache-backed fetch instead of direct file read
+        well, well_data, source = fetch_well_data(resolved_path, wellName)
         
-        well_data = well.to_dict()
+        # well_data is already available from fetch_well_data
         store_well_in_session(well_file, well_data)
         
         datasets = []
@@ -1301,8 +1308,9 @@ async def generate_cross_plot(well_id: str, data: CrossPlotRequest):
             print("[CROSS PLOT] Error: Well file not found")
             raise HTTPException(status_code=404, detail=f"Well {well_id} not found")
         
-        well = Well.deserialize(filepath=well_file)
-        print(f"[CROSS PLOT] Well loaded successfully: {well.well_name}")
+        # Use cache-backed fetch instead of direct file read
+        well, well_data, source = fetch_well_data(resolved_path, well_id)
+        print(f"[CROSS PLOT] Well loaded successfully from {source}: {well.well_name}")
         print(f"[CROSS PLOT] Number of datasets: {len(well.datasets)}")
         
         print("[CROSS PLOT] Initializing CrossPlotManager...")
@@ -1374,8 +1382,9 @@ async def generate_cpi_plot(well_id: str, data: LogPlotRequest):
         if not os.path.exists(well_file):
             raise HTTPException(status_code=404, detail=f"Well {well_id} not found")
         
-        well = Well.deserialize(filepath=well_file)
-        print(f"[CPI PLOT] Well loaded: {well.well_name}")
+        # Use cache-backed fetch instead of direct file read
+        well, well_data, source = fetch_well_data(resolved_path, well_id)
+        print(f"[CPI PLOT] Well loaded from {source}: {well.well_name}")
         
         # Find XML layout file
         layouts_folder = os.path.join(Path(__file__).parent.parent, "layouts")
