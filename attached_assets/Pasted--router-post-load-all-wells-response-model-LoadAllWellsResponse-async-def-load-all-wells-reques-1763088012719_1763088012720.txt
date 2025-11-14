@@ -1,0 +1,83 @@
+@router.post("/load-all-wells", response_model=LoadAllWellsResponse)
+async def load_all_wells(request: LoadAllWellsRequest):
+    """
+    Load ALL wells from a project into JSON storage cache for eager loading.
+    
+    This endpoint:
+    1. Validates the project path
+    2. Enumerates all .ptrc wells in the project
+    3. Deserializes each well from disk
+    4. Stores all wells in JSON storage with project-based session ID
+    5. Returns summary of loaded wells
+    """
+    try:
+        project_path = os.path.abspath(request.projectPath)
+        if not validate_path(project_path):
+            raise HTTPException(
+                status_code=403,
+                detail="Access denied: path outside petrophysics-workplace"
+            )
+        
+        if not os.path.exists(project_path):
+            raise HTTPException(status_code=404, detail="Project path does not exist")
+        
+        wells_folder = os.path.join(project_path, "10-WELLS")
+        
+        if not os.path.exists(wells_folder):
+            return {
+                "success": True,
+                "sessionId": get_project_session_id(project_path),
+                "totalWells": 0,
+                "loadedWells": 0,
+                "failedWells": [],
+                "message": "No wells folder found in project"
+            }
+        
+        session_id = get_project_session_id(project_path)
+        project_name = os.path.basename(project_path)
+        
+        wells_dict = {}
+        failed_wells = []
+        total_count = 0
+        loaded_count = 0
+        
+        for filename in os.listdir(wells_folder):
+            if filename.endswith('.ptrc'):
+                total_count += 1
+                file_path = os.path.join(wells_folder, filename)
+                well_name = filename.replace('.ptrc', '')
+                
+                try:
+                    well = Well.deserialize(filepath=file_path)
+                    well_data = well.to_dict()
+                    wells_dict[well_name] = well_data
+                    loaded_count += 1
+                    print(f"[LoadAllWells] Loaded well '{well_name}' from {filename}")
+                    # Note: Well data is stored in .ptrc files, not SQLite
+                except Exception as e:
+                    failed_wells.append({"well": well_name, "error": str(e)})
+                    print(f"[LoadAllWells] Failed to load well '{well_name}': {e}")
+        
+        metadata = {
+            "project_path": project_path,
+            "project_name": project_name,
+            "modified_wells": []
+        }
+        
+        cache_service.store_session(session_id, wells_dict, metadata)
+        print(f"[LoadAllWells] Stored {loaded_count} wells in JSON storage session {session_id}")
+        
+        return {
+            "success": True,
+            "sessionId": session_id,
+            "totalWells": total_count,
+            "loadedWells": loaded_count,
+            "failedWells": failed_wells,
+            "message": f"Successfully loaded {loaded_count} of {total_count} wells into JSON storage"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[LoadAllWells] Error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to load wells: {str(e)}")

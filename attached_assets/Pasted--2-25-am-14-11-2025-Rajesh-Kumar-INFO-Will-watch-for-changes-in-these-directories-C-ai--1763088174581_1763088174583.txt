@@ -1,0 +1,121 @@
+[2:25 am, 14/11/2025] Rajesh Kumar: INFO:     Will watch for changes in these directories: ['C:\\ai_projects\\petro_v3_13-11-25__json_SQL-LITE\\backend']
+INFO:     Uvicorn running on http://localhost:5001 (Press CTRL+C to quit)
+INFO:     Started reloader process [26848] using WatchFiles
+INFO:     Started server process [18400]
+INFO:     Waiting for application startup.
+============================================================
+[STARTUP] Initializing File-Based Well Storage...
+============================================================
+[FileWellStorage] Indexing .ptrc files in C:\ai_projects\petro_v3_13-11-25__json_SQL-LITE\petrophysics-workplace...
+[FileWellStorage] Indexed 37 well files.
+  - dfgdfgdf::#13-31 Hoffman Et Al -> C:\ai_projects\petro_v3_13-11-25__json_SQL-LITE\petrophysics-workplace\dfgdfgdf\10-WELLS\#13-31 Hoffman Et Al.ptrc
+  - dfgdfgdf::#21D-14 Rozet Minnelusa Unit -> C:\ai_projects\petro_v3_13-11-25__json_SQL-LITE\petrophysics-workplace\dfgdfgdf\10-WELLS\#21D-14 Rozet Minnelusa Unit.ptrc
+  - dfgdfgdf::#31-6 Duvall -> C:\ai_projects\petro_v3_13-11-25__json_SQL-LITE\petrophysics-workplace\dfgdfgdf\10-WELLS\#31-6 Duvall.ptrc
+[STARTUP] Well file indexing complete. App is ready.
+============================================================
+INFO:     Application startup complete.
+  [STORAGE] Retrieved current project: C:\ai_projects\petro_v3_13-11-25__json_SQL-LITE\petrophysics-workplace\project
+INFO:     127.0.0.1:53199 - "GET /api/workspace/info HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53201 - "GET /api/cli/commands HTTP/1.1" 200 OK
+  [STORAGE] Found 0 saved layouts for project: C:\ai_projects\petro_v3_13-11-25__json_SQL-LITE\petrophysics-workplace\project
+INFO:     127.0.0.1:53203 - "GET /api/workspace/layouts/list?projectPath=C%3A%5Cai_projects%5Cpetro_v3_13-11-25__json_SQL-LITE%5Cpetrophysics-workplace%5Cproject HTTP/1.1" 200 OK
+  [STORAGE] Current project set: C:\ai_projects\petro_v3_13-11-25_json_SQL-LITE\petrophysics-workplace\project at C:\ai_projects\petro_v3_13-11-25_json_SQL-LITE\petrophysics-workplace\project
+[Projects] Current project set to: C:\ai_projects\petro_v3_13-11-25_json_SQL-LITE\petrophysics-workplace\project at C:\ai_projects\petro_v3_13-11-25_json_SQL-LITE\petrophysics-workplace\project
+INFO:     127.0.0.1:53206 - "POST /api/projects/set-current HTTP/1.1" 200 OK
+[LoadAllWells] Loaded well 'AGTD005' from AGTD005.ptrc
+[LoadAllWells] Loaded well 'AGTD006' from AGTD006.ptrc
+[LoadAllWells] Loaded well 'AGTD020' from AGTD020.ptrc
+[LoadAllWells] Loaded well 'AGTD032' from AGTD032.ptrc
+[LoadAllWells] Loaded well 'AGTD036' from AGTD036.ptrc
+[LoadAllWells] Loaded well 'AMBASAN' from AMBASAN.ptrc
+[LoadAllWells] Loaded well 'GJLA013' from GJLA013.ptrc
+[LoadAllWells] Loaded well 'JAILUNGPARA001' from JAILUNGPARA001.ptrc
+[LoadAllWells] Loaded well 'KATHALCHARI001' from KATHALCHARI001.ptrc
+[LoadAllWells] Loaded well 'KHBL001' from KHBL001.ptrc
+[LoadAllWells] Loaded well 'KJ#14' from KJ#14.ptrc
+[LoadAllWells] Loaded well 'kj-04_splice' from kj-04_splice.ptrc
+[LoadAllWells] Loaded well 'KJ-05' from KJ-05.ptrc
+[LoadAllWells] Loaded well 'kj-05_splice' from kj-05_splice.ptrc
+[LoadAllWells] Loaded well 'KJ-08' from KJ-08.ptrc
+[LoadAllWells] Loaded well 'KJBN012' from KJBN012.ptrc
+[LoadAllWells] Loaded well 'MTBR001' from MTBR001.ptrc
+[LoadAllWells] Loaded well 'RKKN051' from RKKN051.ptrc
+[LoadAllWells] Loaded well 'RKMN049' from RKMN049.ptrc
+[LoadAllWells] Loaded well 'SBRI024' from SBRI024.ptrc
+[LoadAllWells] Loaded well 'SELAN-251001_KJ#14_COMP MAIN LAS' from SELAN-251001_KJ#14_COMP MAIN LAS.ptrc
+[LoadAllWells] Loaded well 'SKBR001' from SKBR001.ptrc
+  [STORAGE] Stored 22 wells for project project_5017a6722b020fba035534dc1c535851
+[LoadAllWells] Stored 22 wells in JSON storage session project_5017a6722b020fba035534dc1c535851
+  [STORAGE] Loading layout 'default' for project: C:/ai_projects/petro_v3_13-11-25__json_SQL-LITE/petrophysics-workplace/project (session: project_7073...)
+  [STORAGE] No layout 'default' found for project: C:/ai_projects/petro_v3_13-11-25__json_SQL-LITE/petrophysics-workplace/project
+  [STORAGE] No layout 'default' found for project
+INFO:     127.0.0.1:53207 - "POST /api/projects/load-all-wells HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53209 - "GET /api/workspace/layout?projectPath=C%3A%5Cai_projects%5Cpetro_v3_13-11-25__json_SQL-LITE%5Cpetrophysics-workplace%5Cproject&layoutName=default HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53686 - "GET /api/cli/history/load?projectPath=C:%5Cai_projects%5Cpetro_v3_13-11-25__json_SQL-LITE%5Cpetrophysics-workplace%5Cproject HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53685 - "GET /api/cli/commands HTTP/1.1" 200 OK
+[Wells API] Found 22 wells in file index
+[FileWellStorage] Cache MISS for project::AGTD005, loading from disk...
+[FileWellStorage] Cached: project::AGTD005 (cache size: 1/50)
+[FileWellStorage] Cache MISS for project::AGTD006, loading from disk...
+[FileWellStorage] Cached: project::AGTD006 (cache size: 2/50)
+[FileWellStorage] Cache MISS for project::AGTD020, loading from disk...
+[FileWellStorage] Cached: project::AGTD020 (cache size: 3/50)
+[FileWellStorage] Cache MISS for project::AGTD032, loading from disk...
+[FileWellStorage] Cached: project::AGTD032 (cache size: 4/50)
+[FileWellStorage] Cache MISS for project::AGTD036, loading from disk...
+[FileWellStorage] Cached: project::AGTD036 (cache size: 5/50)
+[FileWellStorage] Cache MISS for project::AMBASAN, loading from disk...
+[FileWellStorage] Cached: project::AMBASAN (cache size: 6/50)
+[FileWellStorage] Cache MISS for project::GJLA013, loading from disk...
+[FileWellStorage] Cached: project::GJLA013 (cache size: 7/50)
+[FileWellStorage] Cache MISS for project::JAILUNGPARA001, loading from disk...
+[FileWellStorage] Cached: project::JAILUNGPARA001 (cache size: 8/50)
+[FileWellStorage] Cache MISS for project::KATHALCHARI001, loading from disk...
+[FileWellStorage] Cached: project::KATHALCHARI001 (cache size: 9/50)
+[FileWellStorage] Cache MISS for project::KHBL001, loading from disk...
+[FileWellStorage] Cached: project::KHBL001 (cache size: 10/50)
+[FileWellStorage] Cache MISS for project::KJ#14, loading from disk...
+[FileWellStorage] Cached: project::KJ#14 (cache size: 11/50)
+[FileWellStorage] Cache MISS for project::KJ-05, loading from disk...
+[FileWellStorage] Cached: project::KJ-05 (cache size: 12/50)
+[FileWellStorage] Cache MISS for project::KJ-08, loading from disk...
+[FileWellStorage] Cached: project::KJ-08 (cache size: 13/50)
+[FileWellStorage] Cache MISS for project::KJBN012, loading from disk...
+[FileWellStorage] Cached: project::KJBN012 (cache size: 14/50)
+[FileWellStorage] Cache MISS for project::MTBR001, loading from disk...
+[FileWellStorage] Cached: project::MTBR001 (cache size: 15/50)
+[FileWellStorage] Cache MISS for project::RKKN051, loading from disk...
+[FileWellStorage] Cached: project::RKKN051 (cache size: 16/50)
+[FileWellStorage] Cache MISS for project::RKMN049, loading from disk...
+[FileWellStorage] Cached: project::RKMN049 (cache size: 17/50)
+[FileWellStorage] Cache MISS for project::SBRI024, loading from disk...
+[FileWellStorage] Cached: project::SBRI024 (cache size: 18/50)
+[FileWellStorage] Cache MISS for project::SELAN-251001_KJ#14_COMP MAIN LAS, loading from disk...
+[FileWellStorage] Cached: project::SELAN-251001_KJ#14_COMP MAIN LAS (cache size: 19/50)
+[FileWellStorage] Cache MISS for project::SKBR001, loading from disk...
+[FileWellStorage] Cached: project::SKBR001 (cache size: 20/50)
+[FileWellStorage] Cache MISS for project::kj-04_splice, loading from disk...
+[FileWellStorage] Cached: project::kj-04_splice (cache size: 21/50)
+[FileWellStorage] Cache MISS for project::kj-05_splice, loading from disk...
+[FileWellStorage] Cached: project::kj-05_splice (cache size: 22/50)
+INFO:     127.0.0.1:62527 - "GET /api/wells/list?projectPath=C%3A%5Cai_projects%5Cpetro_v3_13-11-25__json_SQL-LITE%5Cpetrophysics-workplace%5Cproject HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61598 - "GET /api/cli/selected-wells/C%3A%5Cai_projects%5Cpetro_v3_13-11-25__json_SQL-LITE%5Cpetrophysics-workplace%5Cproject HTTP/1.1" 200 OK
+  [STORAGE] Retrieved active well 'KJ#14' for project C:\ai_projects\petro_v3_13-11-25__json_SQL-LITE\petrophysics-workplace\project
+INFO:     127.0.0.1:63173 - "GET /api/cli/active-well/C%3A%5Cai_projects%5Cpetro_v3_13-11-25__json_SQL-LITE%5Cpetrophysics-workplace%5Cproject HTTP/1.1" 200 OK
+  [STORAGE] Retrieved session data for project_5017a6722b020fba035534dc1c535851: 22 wells
+  [STORAGE] Stored 22 wells for project project_5017a6722b020fba035534dc1c535851
+[Storage] Stored well metadata in session project_5017a6722b020fba035534dc1c535851
+INFO:     127.0.0.1:54620 - "GET /api/wells/load?filePath=C%3A%5Cai_projects%5Cpetro_v3_13-11-25__json_SQL-LITE%5Cpetrophysics-workplace%5Cproject%5C10-WELLS%5CKJ%2314.ptrc HTTP/1.1" 200 OK
+[FileWellStorage] Cache HIT for project::KJ#14
+[DataAPI] Loaded well 'KJ#14' from file storage (from disk)
+  [STORAGE] Retrieved session data for project_5017a6722b020fba035534dc1c535851: 22 wells
+  [STORAGE] Stored 22 wells for project project_5017a6722b020fba035534dc1c535851
+[Storage] Stored well metadata in session project_5017a6722b020fba035534dc1c535851
+INFO:     127.0.0.1:54093 - "GET /api/wells/data?wellPath=C%3A%5Cai_projects%5Cpetro_v3_13-11-25__json_SQL-LITE%5Cpetrophysics-workplace%5Cproject%5C10-WELLS%5CKJ%2314.ptrc HTTP/1.1" 200 OK
+[FileWellStorage] Cache HIT for project::KJ#14
+[DataAPI] Loaded well 'KJ#14' from file storage (from disk)
+  [STORAGE] Retrieved session data for project_5017a6722b020fba035534dc1c535851: 22 wells
+  [STORAGE] Stored 22 wells for project project_5017a6722b020fba035534dc1c535851
+[Storage] Stored well metadata in session project_5017a6722b020fba035534dc1c535851
+INFO:     127.0.0.1:51466 - "GET /api/wells/data?wellPath=C%3A%5Cai_projects%5Cpetro_v3_13-11-25__json_SQL-LITE%5Cpetrophysics-workplace%5Cproject%5C10-WELLS%5CKJ%2314.ptrc HTTP/1.1" 200 OK
+[2:27 am, 14/11/2025] Rajesh Kumar: please see the complete log when application is started, I have not opened the browser yet, what I see is repeated .ptrc file reads.
