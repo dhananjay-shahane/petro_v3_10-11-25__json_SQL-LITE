@@ -60,7 +60,8 @@ const LogValuesVirtualTable = memo(function LogValuesVirtualTable({
 
   return (
     <div className="flex flex-col border border-border" style={{ height: `${height}px` }}>
-      <div className="flex bg-muted dark:bg-card border-b border-border" style={{ height: `${HEADER_HEIGHT}px` }}>
+      {/* Sticky header */}
+      <div className="sticky top-0 z-10 flex bg-muted dark:bg-card border-b border-border" style={{ height: `${HEADER_HEIGHT}px` }}>
         {logs.map((log, index) => (
           <div
             key={index}
@@ -71,10 +72,13 @@ const LogValuesVirtualTable = memo(function LogValuesVirtualTable({
         ))}
       </div>
       
+      {/* Scrollable content */}
       <div 
         ref={scrollRef}
         className="overflow-auto relative"
-        style={{ height: `${scrollHeight}px` }}
+        style={{ 
+          height: `${scrollHeight}px`
+        }}
         onScroll={handleScroll}
       >
         <div style={{ height: `${totalHeight}px`, position: 'relative' }}>

@@ -33,7 +33,7 @@ from utils.cpi_plotly import CPIPlotlyManager
 from utils.matplotlib_cpi_plot import MatplotlibCPIPlotter
 from utils.file_well_storage import get_file_well_storage, CACHE_LOCK
 from utils.sqlite_storage import SQLiteStorageService
-from utils.data_import_export import ImportLasFileCommand
+from utils.data_import_export import ImportLasFileCommand, create_well_from_las
 
 # Keep SQLite for non-well data (sessions, projects, etc.)
 session_storage = SQLiteStorageService()
@@ -318,8 +318,10 @@ async def create_from_las(
     setName: str = Form(None),
     datasetType: str = Form("CONTINUOUS")
 ):
-    """Upload LAS file and create well in project"""
+    """Upload LAS file and create well in project using shared import logic"""
     logs = []
+    tmp_las_path = None
+    
     try:
         logs.append({"message": "Starting LAS file upload...", "type": "info"})
         
@@ -356,7 +358,6 @@ async def create_from_las(
         # Validate file size while reading (500 MB limit)
         MAX_FILE_SIZE = 500 * 1024 * 1024
         total_size = 0
-        tmp_las_path = None
         
         with tempfile.NamedTemporaryFile(mode='wb', suffix='.las', delete=False) as tmp_file:
             tmp_las_path = tmp_file.name
@@ -380,165 +381,78 @@ async def create_from_las(
                     )
                 tmp_file.write(chunk)
         
-        try:
-            logs.append({"message": "Parsing LAS file...", "type": "info"})
-            
-            las = lasio.read(tmp_las_path)
-            
-            well_name = None
-            
-            try:
-                if hasattr(las.well, 'WELL'):
-                    well_obj = las.well.WELL
-                    if well_obj and well_obj.value:
-                        well_name = str(well_obj.value).strip()
-            except:
-                pass
-            
-            if not well_name:
-                for item in las.well:
-                    if item.mnemonic.upper() == 'WELL' and item.value:
-                        well_name = str(item.value).strip()
-                        break
-            
-            if not well_name:
-                well_name = Path(filename).stem
-            
-            logs.append({"message": f"Extracted well name: {well_name}", "type": "info"})
-            
-            # Determine dataset name: custom setName > LAS SET parameter > default "MAIN"
-            dataset_name = 'MAIN'
-            if setName and setName.strip():
-                dataset_name = setName.strip()
-                logs.append({"message": f"Using custom dataset name: {dataset_name}", "type": "info"})
-            else:
-                try:
-                    if hasattr(las.params, 'SET') and las.params.SET.value:
-                        dataset_name = str(las.params.SET.value).strip()
-                        logs.append({"message": f"Using SET parameter from LAS file: {dataset_name}", "type": "info"})
-                except:
-                    pass
-            
-            logs.append({"message": f"Dataset name: {dataset_name}", "type": "info"})
-            
-            # Normalize dataset type
-            dataset_type_normalized = 'Cont' if datasetType.upper() == 'CONTINUOUS' else 'Point'
-            logs.append({"message": f"Dataset type: {datasetType} (normalized to {dataset_type_normalized})", "type": "info"})
-            
-            top = las.well.STRT.value
-            bottom = las.well.STOP.value
-            
-            dataset = Dataset.from_las(
-                filename=tmp_las_path,
-                dataset_name=dataset_name,
-                dataset_type=dataset_type_normalized,
-                well_name=well_name
-            )
-            
-            logs.append({"message": "LAS file parsed successfully", "type": "success"})
-            logs.append({"message": f"Found {len(dataset.well_logs)} log curves", "type": "info"})
-            
-            wells_folder = os.path.join(resolved_project_path, '10-WELLS')
-            os.makedirs(wells_folder, exist_ok=True)
-            
-            well_file_path = os.path.join(wells_folder, f'{well_name}.ptrc')
-            
-            if os.path.exists(well_file_path):
-                logs.append({"message": f"Well \"{well_name}\" already exists, checking for duplicates...", "type": "info"})
-                
-                # Use cache-only fetch to load existing well
-                storage = get_file_well_storage()
-                well_data = storage.get_cached_well_data(resolved_project_path, well_name)
-                if not well_data:
-                    raise HTTPException(
-                        status_code=500, 
-                        detail=f"Well '{well_name}' exists on disk but not loaded in cache. Please reload the project."
-                    )
-                well = Well.from_dict(well_data)
-                
-                # Implement versioning: if dataset name exists, auto-increment (MAIN, MAIN_1, MAIN_2, etc.)
-                existing_dataset_names = [dtst.name for dtst in well.datasets]
-                original_dataset_name = dataset_name
-                if dataset_name in existing_dataset_names:
-                    logs.append({"message": f"Dataset \"{dataset_name}\" already exists, applying versioning...", "type": "info"})
-                    version = 1
-                    while f"{original_dataset_name}_{version}" in existing_dataset_names:
-                        version += 1
-                    dataset_name = f"{original_dataset_name}_{version}"
-                    dataset.name = dataset_name
-                    logs.append({"message": f"Versioned dataset name: {dataset_name}", "type": "info"})
-                
-                well.datasets.append(dataset)
-                logs.append({"message": f"Dataset \"{dataset_name}\" appended to existing well", "type": "success"})
-            else:
-                logs.append({"message": f"Creating new well \"{well_name}\"...", "type": "info"})
-                well = Well(
-                    date_created=datetime.now(),
-                    well_name=well_name,
-                    well_type='Dev'
-                )
-                
-                ref = Dataset.reference(
-                    top=0,
-                    bottom=bottom,
-                    dataset_name='REFERENCE',
-                    dataset_type='REFERENCE',
-                    well_name=well_name
-                )
-                
-                wh = Dataset.well_header(
-                    dataset_name='WELL_HEADER',
-                    dataset_type='WELL_HEADER',
-                    well_name=well_name
-                )
-                const = Constant(name='WELL_NAME', value=well.well_name, tag=well.well_name)
-                wh.constants.append(const)
-                
-                well.datasets.append(ref)
-                well.datasets.append(wh)
-                well.datasets.append(dataset)
-                
-                logs.append({"message": "New well created with REFERENCE and WELL_HEADER datasets", "type": "success"})
-            
-            logs.append({"message": "Saving well to project...", "type": "info"})
-            
-            # Save to file-based storage (updates BOTH disk and cache atomically)
-            well_data = well.to_dict()
-            storage = get_file_well_storage()
-            if storage.save_well_data(well_data, resolved_project_path):
-                logs.append({"message": "Well saved to file storage and cache updated", "type": "success"})
-                store_well_in_session(well_file_path, well_data)
-                logs.append({"message": "Project marked as modified", "type": "success"})
-            else:
-                logs.append({"message": "ERROR: Failed to save well", "type": "error"})
-                raise HTTPException(status_code=500, detail="Failed to save well data")
-            
-            logs.append({"message": f"SUCCESS: Well saved to: {well_file_path}", "type": "success"})
-            
-            las_folder = os.path.join(resolved_project_path, '02-INPUT_LAS_FOLDER')
-            os.makedirs(las_folder, exist_ok=True)
-            las_destination = os.path.join(las_folder, filename)
-            shutil.copy2(tmp_las_path, las_destination)
-            
-            logs.append({"message": f"SUCCESS: LAS file copied to: {las_destination}", "type": "success"})
-            logs.append({"message": f"Well \"{well_name}\" created successfully!", "type": "success"})
-            
-            return {
-                "success": True,
-                "message": f"Well \"{well_name}\" created successfully",
-                "well": {
-                    "id": well_name,
-                    "name": well_name,
-                    "type": well.well_type
-                },
-                "filePath": well_file_path,
-                "lasFilePath": las_destination,
-                "logs": logs
-            }
-            
-        finally:
-            if tmp_las_path and os.path.exists(tmp_las_path):
-                os.unlink(tmp_las_path)
+        logs.append({"message": f"File saved to temp location: {tmp_las_path}", "type": "info"})
+        
+        # Normalize dataset type
+        dataset_type_normalized = 'Cont' if datasetType.upper() == 'CONTINUOUS' else 'Point'
+        logs.append({"message": f"Dataset type: {datasetType} (normalized to {dataset_type_normalized})", "type": "info"})
+        
+        # Note: In create_well_from_las, dataset_suffix is actually used as the dataset NAME when provided
+        # Priority: 1) dataset_suffix if provided, 2) LAS SET parameter, 3) default "MAIN"
+        dataset_name_override = setName.strip() if setName and setName.strip() else ''
+        if dataset_name_override:
+            logs.append({"message": f"Using custom dataset name: {dataset_name_override}", "type": "info"})
+        
+        # Use the shared create_well_from_las function from data_import_export.py
+        success, message, result = await asyncio.to_thread(
+            create_well_from_las,
+            las_file_path=tmp_las_path,
+            project_path=resolved_project_path,
+            dataset_suffix=dataset_name_override,  # Despite the name, this overrides the dataset name
+            copy_las_to_project=True,
+            dataset_type=dataset_type_normalized,
+            enable_versioning=True
+        )
+        
+        if not success:
+            logs.append({"message": f"ERROR: {message}", "type": "error"})
+            raise HTTPException(status_code=400, detail=message)
+        
+        logs.append({"message": message, "type": "success"})
+        
+        # Reload the well into cache
+        storage = get_file_well_storage()
+        well_name = result['well_name']
+        well_file_path = result['well_file_path']
+        
+        # Force reload from disk to cache
+        storage.invalidate_cached_well(resolved_project_path, well_name)
+        well_data = await asyncio.to_thread(storage.load_well_from_disk, resolved_project_path, well_name)
+        
+        if well_data:
+            logs.append({"message": "Well loaded into cache successfully", "type": "success"})
+        
+        # Store in session
+        store_well_in_session(well_file_path, well_data)
+        
+        # Build response based on result
+        response_data = {
+            "success": True,
+            "message": message,
+            "well": {
+                "id": well_name,
+                "name": well_name,
+                "type": "Dev"
+            },
+            "filePath": well_file_path,
+            "lasFilePath": result.get('las_destination'),
+            "logs": logs
+        }
+        
+        # Add duplicate detection info if available
+        if result.get('skipped_duplicate'):
+            response_data['skipped_duplicate'] = True
+            response_data['duplicate_curves'] = result.get('duplicate_curves', [])
+            response_data['dataset_name'] = result.get('dataset_name')
+            response_data['well_name'] = well_name
+        elif result.get('dataset_merged'):
+            response_data['dataset_merged'] = True
+            response_data['new_curves_added'] = result.get('new_curves_added', [])
+            response_data['duplicate_curves'] = result.get('duplicate_curves', [])
+            response_data['dataset_name'] = result.get('dataset_name')
+            response_data['well_name'] = well_name
+        
+        return response_data
                 
     except HTTPException:
         raise
@@ -546,6 +460,13 @@ async def create_from_las(
         traceback.print_exc()
         logs.append({"message": f"ERROR: {str(e)}", "type": "error"})
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        # Clean up temp file
+        if tmp_las_path and os.path.exists(tmp_las_path):
+            try:
+                os.unlink(tmp_las_path)
+            except:
+                pass
 
 
 @router.post("/preview-las-batch", response_model=LASBatchPreviewResponse)

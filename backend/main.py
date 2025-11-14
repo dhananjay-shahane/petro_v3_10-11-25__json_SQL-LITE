@@ -19,6 +19,15 @@ from dependencies import WORKSPACE_ROOT
 IS_PRODUCTION = os.environ.get('NODE_ENV') == 'production'
 MAX_UPLOAD_SIZE = 500 * 1024 * 1024  # 500 MB limit for large LAS files
 
+# Configure logging BEFORE anything else to ensure all logs have timestamps
+logging.basicConfig(
+    level=logging.DEBUG if not IS_PRODUCTION else logging.INFO,
+    format='[%(asctime)s] %(levelname)s: %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S',
+    stream=sys.stdout,
+    force=True
+)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -27,14 +36,15 @@ async def lifespan(app: FastAPI):
     Handles startup and shutdown events.
     """
     # STARTUP: Index well files (.ptrc) at application startup
-    print("=" * 60)
-    print("[STARTUP] Initializing File-Based Well Storage...")
-    print("=" * 60)
+    logger = logging.getLogger(__name__)
+    logger.info("=" * 60)
+    logger.info("[STARTUP] Initializing File-Based Well Storage...")
+    logger.info("=" * 60)
     
     try:
         # Step 1: Index all well file paths
         initialize_file_well_storage(WORKSPACE_ROOT)
-        print("[STARTUP] Well file indexing complete.")
+        logger.info("[STARTUP] Well file indexing complete.")
         
         # Step 2: Eager load current project wells into memory
         storage_service = SQLiteStorageService()
@@ -42,36 +52,36 @@ async def lifespan(app: FastAPI):
         
         if current_project and current_project.get("projectPath"):
             project_path = current_project["projectPath"]
-            print(f"[STARTUP] Found current project: {project_path}")
+            logger.info(f"[STARTUP] Found current project: {project_path}")
             
             # Preload all wells for the current project
             file_storage = get_file_well_storage()
             stats = await file_storage.preload_project(project_path)
             
-            print(f"[STARTUP] EAGER LOADING complete: {stats['loaded_wells']}/{stats['total_wells']} wells loaded into memory")
+            logger.info(f"[STARTUP] EAGER LOADING complete: {stats['loaded_wells']}/{stats['total_wells']} wells loaded into memory")
         else:
             # Fallback: try to load from default project folder
             default_project = Path(WORKSPACE_ROOT) / "project"
             if default_project.exists():
-                print(f"[STARTUP] No current project found, using default: {default_project}")
+                logger.info(f"[STARTUP] No current project found, using default: {default_project}")
                 file_storage = get_file_well_storage()
                 stats = await file_storage.preload_project(str(default_project))
-                print(f"[STARTUP] EAGER LOADING complete: {stats['loaded_wells']}/{stats['total_wells']} wells loaded into memory")
+                logger.info(f"[STARTUP] EAGER LOADING complete: {stats['loaded_wells']}/{stats['total_wells']} wells loaded into memory")
             else:
-                print("[STARTUP] No current project found. Wells will be loaded on-demand.")
+                logger.info("[STARTUP] No current project found. Wells will be loaded on-demand.")
         
-        print("[STARTUP] App is ready.")
+        logger.info("[STARTUP] App is ready.")
     except Exception as e:
-        print(f"[STARTUP] Warning: Failed to initialize storage: {e}")
+        logger.error(f"[STARTUP] Warning: Failed to initialize storage: {e}")
         import traceback
         traceback.print_exc()
     
-    print("=" * 60)
+    logger.info("=" * 60)
     
     yield  # App starts serving requests
     
     # SHUTDOWN: Cleanup if needed
-    print("[SHUTDOWN] Server shutting down...")
+    logger.info("[SHUTDOWN] Server shutting down...")
 
 
 def create_app():
@@ -83,12 +93,6 @@ def create_app():
         docs_url="/docs" if not IS_PRODUCTION else None,
         redoc_url="/redoc" if not IS_PRODUCTION else None,
         lifespan=lifespan
-    )
-    
-    logging.basicConfig(
-        level=logging.DEBUG if not IS_PRODUCTION else logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        stream=sys.stdout
     )
     
     cors_origins = ['http://localhost:5000', 'http://0.0.0.0:5000']
