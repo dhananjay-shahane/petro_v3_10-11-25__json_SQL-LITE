@@ -119,6 +119,24 @@ export default function DataBrowserPanelNew({
       }
     }
     
+    // Use datasets from Workspace if already loaded (avoids duplicate API call)
+    // Check for timestamp to confirm data was actually fetched (handles empty dataset arrays correctly)
+    const hasLoadedData = (selectedWell as any)?._dataLoadTimestamp || (selectedWell as any)?._refreshTimestamp;
+    if (hasLoadedData && Array.isArray((selectedWell as any).datasets)) {
+      console.log("[DataBrowser] Using datasets from Workspace (already loaded in memory)");
+      const wellDatasets = (selectedWell as any).datasets as Dataset[];
+      setDatasets(wellDatasets);
+      
+      // Select dataset with priority: selectedDatasetProp → first dataset
+      if (selectedDatasetProp) {
+        setSelectedDataset(selectedDatasetProp);
+      } else if (wellDatasets.length > 0) {
+        setSelectedDataset(wellDatasets[0]);
+      }
+      
+      return; // Skip API fetch - data already available from Workspace
+    }
+    
     const loadWellData = async () => {
       if (!selectedWell?.path) {
         return;
@@ -197,7 +215,7 @@ export default function DataBrowserPanelNew({
       if (timeoutId) clearTimeout(timeoutId);
       abortController.abort();
     };
-  }, [selectedWell, projectPath]);
+  }, [selectedWell, projectPath, (selectedWell as any)?._dataLoadTimestamp, (selectedWell as any)?._refreshTimestamp]);
 
   const tabs = [
     { id: "logs", label: "Logs" },

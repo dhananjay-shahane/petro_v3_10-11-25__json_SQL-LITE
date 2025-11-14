@@ -1242,17 +1242,18 @@ export default function Workspace() {
     });
     channel.close();
 
-    if (!well.data && well.path) {
+    if (!well.datasets && well.path) {
       try {
+        // Use /api/wells/data as the single canonical endpoint
         const response = await axios.get(
-          `/api/wells/load?filePath=${encodeURIComponent(well.path)}`,
+          `/api/wells/data?wellPath=${encodeURIComponent(well.path)}`,
         );
         const wellData = response.data;
         const updatedWell = {
           ...well,
-          data: wellData.data,
-          logs: wellData.logs,
-          metadata: wellData.metadata,
+          datasets: wellData.datasets || [],
+          wellName: wellData.wellName || well.name,
+          _dataLoadTimestamp: Date.now(), // Track when data was loaded
         };
         setSelectedWell(updatedWell);
         setWells((prev) =>
@@ -1394,16 +1395,17 @@ export default function Workspace() {
     try {
       console.log("[Workspace] Refreshing selected well data...");
 
-      // Reload the well data to get updated datasets
+      // Reload the well data to get updated datasets using canonical endpoint
       const response = await axios.get(
-        `/api/wells/load?filePath=${encodeURIComponent(selectedWell.path)}`,
+        `/api/wells/data?wellPath=${encodeURIComponent(selectedWell.path)}`,
       );
 
-      if (response.data && response.data.well) {
+      if (response.data && response.data.datasets) {
         // Create a completely new well object with a timestamp to force Data Browser refresh
         const updatedWell = {
           ...selectedWell,
-          datasets: response.data.well.datasets?.length || 0,
+          datasets: response.data.datasets || [],
+          wellName: response.data.wellName || selectedWell.name,
           _refreshTimestamp: Date.now(), // Force refresh by creating new object reference
         };
 
